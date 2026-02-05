@@ -51,7 +51,7 @@ chmod +x scripts/*.sh
 
 **Time:** ~45 minutes total
 
-####Option 2: Step-by-Step Deployment
+#### Option 2: Step-by-Step Deployment
 
 ```bash
 # Step 1: Infrastructure (20 min)
@@ -301,9 +301,8 @@ For issues or questions:
 ### Documentation
 
 - [Architecture Diagram](./docs/DENODO_KEYCLOAK_ARCHITECTURE.md)
-- [Security Configuration](./docs/SECURITY.md)
-- [API Reference](./docs/API_REFERENCE.md)
-- [Data Sources Guide](./docs/DATA_SOURCES.md)
+- [Project Summary](./PROJECT_SUMMARY.md)
+- [Quick Reference](./QUICK_REFERENCE.md)
 
 ---
 
