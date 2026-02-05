@@ -44,8 +44,8 @@ graph TB
         end
         
         subgraph "Lambda & API Gateway"
-            APIGW[API Gateway<br/>/api/v1/users/{userId}/permissions<br/>REST API]
-            AUTH_API[Authorization API<br/>Lambda Function<br/>Runtime: Python 3.11<br/>Memory: 256MB]
+            APIGW["API Gateway<br/>/api/v1/users/userId/permissions<br/>REST API"]
+            AUTH_API["Authorization API<br/>Lambda Function<br/>Runtime: Python 3.11<br/>Memory: 256MB"]
         end
     end
     
@@ -221,7 +221,7 @@ sequenceDiagram
     participant Lambda as Auth Lambda
     participant Secrets as Secrets Manager
     
-    Denodo->>APIGW: GET /users/{userId}/permissions<br/>X-API-Key: xxx
+    Denodo->>APIGW: GET /users/userId/permissions<br/>X-API-Key: xxx
     APIGW->>APIGW: Validate API Key
     APIGW->>Lambda: Invoke Function
     Lambda->>Secrets: Get API Configuration
@@ -245,7 +245,7 @@ sequenceDiagram
     Denodo->>Denodo: Check User Permissions
     Denodo->>RDS: Query: SELECT * FROM entreprises
     RDS-->>Denodo: Return Companies Data
-    Denodo->>API: GET /communes?codePostal={postal_code}
+    Denodo->>API: GET /communes?codePostal=postal_code
     API-->>Denodo: Return Population Data
     Denodo->>Denodo: Join Data Sources
     Denodo-->>User: Combined Result Set
