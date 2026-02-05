@@ -144,6 +144,114 @@ chmod +x cleanup-all.sh
 ./cleanup-all.sh
 ```
 
+### En cas d'erreur "Connection timed out" lors du chargement des données
+
+CloudShell ne peut pas accéder directement aux instances RDS dans les subnets privés. Utilisez la méthode SSM via l'instance Denodo EC2:
+
+```bash
+# 1. Créer un bucket S3 temporaire
+BUCKET_NAME="denodo-poc-temp-$(date +%s)"
+aws s3 mb s3://$BUCKET_NAME --region eu-west-3
+
+# 2. Télécharger et générer les données communes
+echo "Téléchargement des communes..."
+curl -s "https://geo.api.gouv.fr/communes?fields=nom,code,codesPostaux,codeDepartement,codeRegion,population,surface&format=json&geometry=centre" > /tmp/communes.json
+echo "$(cat /tmp/communes.json | jq '. | length') communes téléchargées"
+
+# 3. Générer le SQL communes avec Python
+export COMMUNES_JSON_FILE="/tmp/communes.json"
+python3 <<'PYTHON_SCRIPT' > /tmp/insert_communes.sql
+import json
+import os
+
+json_file = os.environ.get('COMMUNES_JSON_FILE')
+with open(json_file, 'r', encoding='utf-8') as f:
+    communes = json.load(f)
+
+print("-- Insertion des données communes")
+print("BEGIN;")
+
+for commune in communes:
+    code = commune.get('code', '')
+    nom = commune.get('nom', '').replace("'", "''")
+    code_postal = commune.get('codesPostaux', [''])[0] if commune.get('codesPostaux') else ''
+    code_dept = commune.get('codeDepartement', '')
+    code_region = commune.get('codeRegion', '')
+    population = commune.get('population', 0) or 0
+    surface = commune.get('surface', 0) or 0
+    
+    coords = commune.get('centre', {}).get('coordinates', [0, 0]) if commune.get('centre') else [0, 0]
+    longitude = coords[0] if len(coords) > 0 else 0
+    latitude = coords[1] if len(coords) > 1 else 0
+    
+    print(f"INSERT INTO opendata.population_communes (code_commune, nom_commune, code_postal, code_departement, code_region, population, superficie, latitude, longitude) VALUES ('{code}', '{nom}', '{code_postal}', '{code_dept}', '{code_region}', {population}, {surface}, {latitude}, {longitude}) ON CONFLICT (code_commune) DO NOTHING;")
+
+print("COMMIT;")
+PYTHON_SCRIPT
+unset COMMUNES_JSON_FILE
+
+# 4. Générer le SQL entreprises (1000 fictives)
+cat > /tmp/insert_entreprises.sql <<'EOF'
+BEGIN;
+EOF
+
+for i in {1..1000}; do
+    SIREN=$(printf "%09d" $((100000000 + RANDOM % 900000000)))
+    NOM="Entreprise Test $i"
+    DEPTS=("75" "69" "13" "31" "44" "33" "59" "35" "67" "34")
+    DEPT=${DEPTS[$RANDOM % 10]}
+    NAFS=("6201Z" "6202A" "6311Z" "6312Z" "6399Z" "7022Z" "7112B")
+    NAF=${NAFS[$RANDOM % 7]}
+    EFFS=(5 10 20 50 100 250 500 1000)
+    EFF=${EFFS[$RANDOM % 8]}
+    echo "INSERT INTO opendata.entreprises (siren, nom_raison_sociale, code_naf, libelle_naf, statut, effectif, departement, ville, code_postal, date_creation) VALUES ('$SIREN', '$NOM', '$NAF', 'Activites informatiques', 'Actif', $EFF, '$DEPT', 'Ville Test', '${DEPT}001', CURRENT_DATE - INTERVAL '$((RANDOM % 3650)) days') ON CONFLICT (siren) DO NOTHING;" >> /tmp/insert_entreprises.sql
+done
+echo "COMMIT;" >> /tmp/insert_entreprises.sql
+
+# 5. Uploader vers S3
+cd ~/denodo_poc
+aws s3 cp sql/01-create-opendata-schema.sql s3://$BUCKET_NAME/
+aws s3 cp /tmp/insert_communes.sql s3://$BUCKET_NAME/
+aws s3 cp /tmp/insert_entreprises.sql s3://$BUCKET_NAME/
+
+# 6. Récupérer le mot de passe et l'endpoint
+OPENDATA_DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id denodo-poc/opendata/db --region eu-west-3 --query SecretString --output text | jq -r '.password')
+OPENDATA_DB_ENDPOINT="denodo-poc-opendata-db.cacjdkje8yxa.eu-west-3.rds.amazonaws.com"
+
+# 7. Exécuter via SSM sur Denodo EC2
+COMMAND_ID=$(aws ssm send-command \
+  --instance-ids "i-0aef555dcb0ff873f" \
+  --document-name "AWS-RunShellScript" \
+  --parameters "{\"commands\":[
+    \"sudo yum install -y postgresql15 -q\",
+    \"aws s3 cp s3://$BUCKET_NAME/01-create-opendata-schema.sql /tmp/\",
+    \"aws s3 cp s3://$BUCKET_NAME/insert_communes.sql /tmp/\",
+    \"aws s3 cp s3://$BUCKET_NAME/insert_entreprises.sql /tmp/\",
+    \"export PGPASSWORD='$OPENDATA_DB_PASSWORD'\",
+    \"psql -h $OPENDATA_DB_ENDPOINT -U denodo -d opendata -p 5432 -f /tmp/01-create-opendata-schema.sql 2>&1 || echo 'Schema existe'\",
+    \"psql -h $OPENDATA_DB_ENDPOINT -U denodo -d opendata -p 5432 -f /tmp/insert_communes.sql -q\",
+    \"psql -h $OPENDATA_DB_ENDPOINT -U denodo -d opendata -p 5432 -f /tmp/insert_entreprises.sql -q\",
+    \"psql -h $OPENDATA_DB_ENDPOINT -U denodo -d opendata -p 5432 -t -c 'SELECT COUNT(*) FROM opendata.population_communes;'\",
+    \"psql -h $OPENDATA_DB_ENDPOINT -U denodo -d opendata -p 5432 -t -c 'SELECT COUNT(*) FROM opendata.entreprises;'\"
+  ]}" \
+  --region eu-west-3 \
+  --query 'Command.CommandId' \
+  --output text)
+
+echo "Command ID: $COMMAND_ID"
+
+# 8. Vérifier le résultat (attendre 2-5 min)
+sleep 60
+aws ssm get-command-invocation \
+  --command-id $COMMAND_ID \
+  --instance-id "i-0aef555dcb0ff873f" \
+  --region eu-west-3 \
+  --query '{Status:Status,Output:StandardOutputContent}'
+
+# 9. Nettoyer le bucket temporaire
+aws s3 rb s3://$BUCKET_NAME --force
+```
+
 ---
 
 ## 📁 Vérifier les Résultats
@@ -191,20 +299,35 @@ aws secretsmanager get-secret-value \
 
 ### Tester la connexion à OpenData DB
 
+**Note:** La connexion directe depuis CloudShell n'est pas possible car les RDS sont dans des subnets privés. Utilisez SSM pour exécuter des requêtes via l'instance Denodo EC2:
+
 ```bash
 # Récupérer les infos de connexion
 OPENDATA_ENDPOINT=$(cat deployment-info.json | jq -r '.rdsEndpoints.opendata')
 OPENDATA_PASSWORD=$(aws secretsmanager get-secret-value --secret-id denodo-poc/opendata/db --region eu-west-3 --query SecretString --output text | jq -r '.password')
 
-# Se connecter à la base
-export PGPASSWORD=$OPENDATA_PASSWORD
-psql -h $OPENDATA_ENDPOINT -U denodo -d opendata -p 5432
+# Exécuter une requête via SSM sur Denodo EC2
+aws ssm send-command \
+  --instance-ids "i-0aef555dcb0ff873f" \
+  --document-name "AWS-RunShellScript" \
+  --parameters "{\"commands\":[
+    \"export PGPASSWORD='$OPENDATA_PASSWORD'\",
+    \"psql -h $OPENDATA_ENDPOINT -U denodo -d opendata -p 5432 -c 'SELECT COUNT(*) as communes FROM opendata.population_communes;'\",
+    \"psql -h $OPENDATA_ENDPOINT -U denodo -d opendata -p 5432 -c 'SELECT COUNT(*) as entreprises FROM opendata.entreprises;'\"
+  ]}" \
+  --region eu-west-3 \
+  --output text
 
-# Dans psql:
-# \dt opendata.*              -- Lister les tables
+# OU ouvrir une session interactive sur Denodo EC2
+aws ssm start-session --target i-0aef555dcb0ff873f --region eu-west-3
+
+# Puis dans la session SSM:
+# export PGPASSWORD="<mot_de_passe>"
+# psql -h <endpoint> -U denodo -d opendata
+# \dt opendata.*
 # SELECT COUNT(*) FROM opendata.entreprises;
 # SELECT COUNT(*) FROM opendata.population_communes;
-# \q                          -- Quitter
+# \q
 ```
 
 ---
@@ -258,12 +381,21 @@ aws secretsmanager list-secrets \
   --output table
 
 echo ""
-echo "📈 Données OpenData:"
+echo "📈 Données OpenData (via SSM sur Denodo EC2):"
 OPENDATA_ENDPOINT=$(cat deployment-info.json | jq -r '.rdsEndpoints.opendata')
 OPENDATA_PASSWORD=$(aws secretsmanager get-secret-value --secret-id denodo-poc/opendata/db --region eu-west-3 --query SecretString --output text | jq -r '.password')
-export PGPASSWORD=$OPENDATA_PASSWORD
-psql -h $OPENDATA_ENDPOINT -U denodo -d opendata -p 5432 -c "SELECT 'Entreprises' as table, COUNT(*) as count FROM opendata.entreprises UNION ALL SELECT 'Communes' as table, COUNT(*) as count FROM opendata.population_communes;" -t
-unset PGPASSWORD
+
+# Exécuter via SSM car CloudShell ne peut pas accéder aux subnets privés
+aws ssm send-command \
+  --instance-ids "i-0aef555dcb0ff873f" \
+  --document-name "AWS-RunShellScript" \
+  --parameters "{\"commands\":[
+    \"export PGPASSWORD='$OPENDATA_PASSWORD'\",
+    \"psql -h $OPENDATA_ENDPOINT -U denodo -d opendata -p 5432 -t -c \\\"SELECT 'Entreprises' as t, COUNT(*) FROM opendata.entreprises UNION ALL SELECT 'Communes', COUNT(*) FROM opendata.population_communes;\\\"\"
+  ]}" \
+  --region eu-west-3 \
+  --query 'Command.CommandId' \
+  --output text
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -377,19 +509,20 @@ denodo_poc/
 
 - [ ] CloudShell ouvert et région `eu-west-3` configurée
 - [ ] Repository cloné et scripts exécutables
-- [ ] Prérequis vérifiés (AWS CLI, jq, curl, psql)
+- [ ] Prérequis vérifiés (AWS CLI, jq, curl, psql, python3)
 - [ ] VPC `vpc-08ffb9d90f07533d0` existe
-- [ ] Instance Denodo `i-0aef555dcb0ff873f` en cours d'exécution
+- [ ] Instance Denodo `i-0aef555dcb0ff873f` en cours d'exécution (requise pour SSM)
 - [ ] Pas d'instances RDS `denodo-poc-*` existantes en erreur
 - [ ] Phase 0: Prérequis ✓
 - [ ] Phase 1: Security Groups ✓
 - [ ] Phase 2: Secrets Manager ✓
 - [ ] Phase 3: RDS Instances ✓ (10-15 min)
-- [ ] Phase 4: Schéma OpenData ✓
-- [ ] Phase 5: Données chargées ✓ (5-10 min)
+- [ ] Phase 4: Schéma OpenData ✓ (via SSM si erreur connexion)
+- [ ] Phase 5: Données chargées ✓ (via SSM - voir section "Connection timed out")
 - [ ] Phase 6: deployment-info.json créé ✓
-- [ ] Vérification: connexion PostgreSQL OK
-- [ ] Vérification: données présentes (entreprises + communes)
+- [ ] Vérification: données présentes via SSM (entreprises + communes)
+
+**Note importante:** Les phases 4 et 5 (chargement des données) nécessitent d'utiliser SSM via l'instance Denodo EC2 car CloudShell ne peut pas accéder aux RDS dans les subnets privés. Voir la section "En cas d'erreur Connection timed out".
 
 ---
 
