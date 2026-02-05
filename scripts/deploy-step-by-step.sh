@@ -55,7 +55,7 @@ pause_for_validation() {
 log_phase "PHASE 0: VÉRIFICATION DES PRÉREQUIS"
 
 log_step "0.1" "Vérification des outils installés"
-for tool in aws jq curl psql; do
+for tool in aws jq curl psql python3; do
     if command -v $tool &> /dev/null; then
         log_success "$tool installé"
     else
@@ -549,26 +549,34 @@ log_success "$COMMUNE_COUNT communes téléchargées"
 
 log_step "5.3" "Génération du script SQL d'insertion pour population_communes"
 
-cat > "$TEMP_DIR/insert_communes.sql" <<'SQL_HEADER'
--- Insertion des données communes
-BEGIN;
-SQL_HEADER
+# Utilisation de Python pour générer le SQL (plus robuste pour l'échappement)
+python3 <<'PYTHON_SCRIPT' > "$TEMP_DIR/insert_communes.sql"
+import json
+import sys
 
-cat "$TEMP_DIR/communes.json" | jq -r '.[] | 
-    "INSERT INTO opendata.population_communes (code_commune, nom_commune, code_postal, code_departement, code_region, population, superficie, latitude, longitude) VALUES (" +
-    "'\'''" + .code + "'\'', " +
-    "'\'''" + (.nom | gsub("'\''"; "'\'''\''")) + "'\'', " +
-    "'\'''" + (.codesPostaux[0] // "") + "'\'', " +
-    "'\'''" + .codeDepartement + "'\'', " +
-    "'\'''" + .codeRegion + "'\'', " +
-    (.population | tostring) + ", " +
-    ((.surface // 0) | tostring) + ", " +
-    ((.centre.coordinates[1] // 0) | tostring) + ", " +
-    ((.centre.coordinates[0] // 0) | tostring) + 
-    ") ON CONFLICT (code_commune) DO NOTHING;"
-' >> "$TEMP_DIR/insert_communes.sql"
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    communes = json.load(f)
 
-echo "COMMIT;" >> "$TEMP_DIR/insert_communes.sql"
+print("-- Insertion des données communes")
+print("BEGIN;")
+
+for commune in communes:
+    code = commune.get('code', '')
+    nom = commune.get('nom', '').replace("'", "''")
+    code_postal = commune.get('codesPostaux', [''])[0] if commune.get('codesPostaux') else ''
+    code_dept = commune.get('codeDepartement', '')
+    code_region = commune.get('codeRegion', '')
+    population = commune.get('population', 0)
+    surface = commune.get('surface', 0)
+    
+    coords = commune.get('centre', {}).get('coordinates', [0, 0])
+    longitude = coords[0] if len(coords) > 0 else 0
+    latitude = coords[1] if len(coords) > 1 else 0
+    
+    print(f"INSERT INTO opendata.population_communes (code_commune, nom_commune, code_postal, code_departement, code_region, population, superficie, latitude, longitude) VALUES ('{code}', '{nom}', '{code_postal}', '{code_dept}', '{code_region}', {population}, {surface}, {latitude}, {longitude}) ON CONFLICT (code_commune) DO NOTHING;")
+
+print("COMMIT;")
+PYTHON_SCRIPT "$TEMP_DIR/communes.json"
 
 log_success "Script SQL communes généré"
 
