@@ -550,11 +550,13 @@ log_success "$COMMUNE_COUNT communes téléchargées"
 log_step "5.3" "Génération du script SQL d'insertion pour population_communes"
 
 # Utilisation de Python pour générer le SQL (plus robuste pour l'échappement)
+export COMMUNES_JSON_FILE="$TEMP_DIR/communes.json"
 python3 <<'PYTHON_SCRIPT' > "$TEMP_DIR/insert_communes.sql"
 import json
-import sys
+import os
 
-with open(sys.argv[1], 'r', encoding='utf-8') as f:
+json_file = os.environ.get('COMMUNES_JSON_FILE')
+with open(json_file, 'r', encoding='utf-8') as f:
     communes = json.load(f)
 
 print("-- Insertion des données communes")
@@ -566,17 +568,18 @@ for commune in communes:
     code_postal = commune.get('codesPostaux', [''])[0] if commune.get('codesPostaux') else ''
     code_dept = commune.get('codeDepartement', '')
     code_region = commune.get('codeRegion', '')
-    population = commune.get('population', 0)
-    surface = commune.get('surface', 0)
+    population = commune.get('population', 0) or 0
+    surface = commune.get('surface', 0) or 0
     
-    coords = commune.get('centre', {}).get('coordinates', [0, 0])
+    coords = commune.get('centre', {}).get('coordinates', [0, 0]) if commune.get('centre') else [0, 0]
     longitude = coords[0] if len(coords) > 0 else 0
     latitude = coords[1] if len(coords) > 1 else 0
     
     print(f"INSERT INTO opendata.population_communes (code_commune, nom_commune, code_postal, code_departement, code_region, population, superficie, latitude, longitude) VALUES ('{code}', '{nom}', '{code_postal}', '{code_dept}', '{code_region}', {population}, {surface}, {latitude}, {longitude}) ON CONFLICT (code_commune) DO NOTHING;")
 
 print("COMMIT;")
-PYTHON_SCRIPT "$TEMP_DIR/communes.json"
+PYTHON_SCRIPT
+unset COMMUNES_JSON_FILE
 
 log_success "Script SQL communes généré"
 
