@@ -358,7 +358,7 @@ if [ "$PROVIDER_STATUS" == "not-found" ]; then
         --db-instance-identifier $PROVIDER_DB_ID \
         --db-instance-class db.t3.micro \
         --engine postgres \
-        --engine-version 15.4 \
+        --engine-version 15 \
         --master-username keycloak \
         --master-user-password "$KEYCLOAK_PROVIDER_DB_PASSWORD" \
         --allocated-storage 20 \
@@ -379,7 +379,7 @@ if [ "$CONSUMER_STATUS" == "not-found" ]; then
         --db-instance-identifier $CONSUMER_DB_ID \
         --db-instance-class db.t3.micro \
         --engine postgres \
-        --engine-version 15.4 \
+        --engine-version 15 \
         --master-username keycloak \
         --master-user-password "$KEYCLOAK_CONSUMER_DB_PASSWORD" \
         --allocated-storage 20 \
@@ -400,7 +400,7 @@ if [ "$OPENDATA_STATUS" == "not-found" ]; then
         --db-instance-identifier $OPENDATA_DB_ID \
         --db-instance-class db.t3.small \
         --engine postgres \
-        --engine-version 15.4 \
+        --engine-version 15 \
         --master-username denodo \
         --master-user-password "$OPENDATA_DB_PASSWORD" \
         --allocated-storage 50 \
