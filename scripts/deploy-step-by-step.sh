@@ -290,90 +290,196 @@ aws rds create-db-subnet-group \
     --region $REGION 2>/dev/null || log_warn "DB subnet group existe déjà"
 log_success "DB Subnet Group: $DB_SUBNET_GROUP_NAME"
 
-log_step "3.2" "Création des 3 instances RDS PostgreSQL"
+log_step "3.2" "Vérification des instances RDS existantes"
+
+# Function to check RDS instance status
+check_rds_status() {
+    local db_id=$1
+    aws rds describe-db-instances \
+        --db-instance-identifier $db_id \
+        --region $REGION \
+        --query 'DBInstances[0].DBInstanceStatus' \
+        --output text 2>/dev/null || echo "not-found"
+}
+
+# Function to wait for deletion
+wait_for_deletion() {
+    local db_id=$1
+    log_info "Attente de la suppression complète de $db_id..."
+    while true; do
+        STATUS=$(check_rds_status $db_id)
+        if [ "$STATUS" == "not-found" ]; then
+            log_success "$db_id complètement supprimé"
+            break
+        fi
+        log_warn "$db_id en cours de suppression (status: $STATUS)... attente 30s"
+        sleep 30
+    done
+}
+
+PROVIDER_DB_ID="${PROJECT_NAME}-keycloak-provider-db"
+CONSUMER_DB_ID="${PROJECT_NAME}-keycloak-consumer-db"
+OPENDATA_DB_ID="${PROJECT_NAME}-opendata-db"
+
+# Check Provider DB
+PROVIDER_STATUS=$(check_rds_status $PROVIDER_DB_ID)
+log_info "Provider DB status: $PROVIDER_STATUS"
+if [ "$PROVIDER_STATUS" == "deleting" ]; then
+    wait_for_deletion $PROVIDER_DB_ID
+elif [ "$PROVIDER_STATUS" == "available" ]; then
+    log_success "Provider DB déjà disponible, réutilisation"
+fi
+
+# Check Consumer DB
+CONSUMER_STATUS=$(check_rds_status $CONSUMER_DB_ID)
+log_info "Consumer DB status: $CONSUMER_STATUS"
+if [ "$CONSUMER_STATUS" == "deleting" ]; then
+    wait_for_deletion $CONSUMER_DB_ID
+elif [ "$CONSUMER_STATUS" == "available" ]; then
+    log_success "Consumer DB déjà disponible, réutilisation"
+fi
+
+# Check OpenData DB
+OPENDATA_STATUS=$(check_rds_status $OPENDATA_DB_ID)
+log_info "OpenData DB status: $OPENDATA_STATUS"
+if [ "$OPENDATA_STATUS" == "deleting" ]; then
+    wait_for_deletion $OPENDATA_DB_ID
+elif [ "$OPENDATA_STATUS" == "available" ]; then
+    log_success "OpenData DB déjà disponible, réutilisation"
+fi
+
+log_step "3.3" "Création des instances RDS PostgreSQL"
 log_info "⏱ Temps estimé: 10-15 minutes"
 
-# Keycloak Provider DB
-PROVIDER_DB_ID="${PROJECT_NAME}-keycloak-provider-db"
-aws rds create-db-instance \
-    --db-instance-identifier $PROVIDER_DB_ID \
-    --db-instance-class db.t3.micro \
-    --engine postgres \
-    --engine-version 15.4 \
-    --master-username keycloak \
-    --master-user-password "$KEYCLOAK_PROVIDER_DB_PASSWORD" \
-    --allocated-storage 20 \
-    --storage-type gp3 \
-    --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
-    --vpc-security-group-ids $RDS_SG_ID \
-    --backup-retention-period 7 \
-    --no-publicly-accessible \
-    --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-provider" \
-    --region $REGION 2>/dev/null || log_warn "Keycloak Provider DB existe déjà"
-log_success "RDS Keycloak Provider en cours de création..."
+# Create Provider DB if needed
+if [ "$PROVIDER_STATUS" == "not-found" ]; then
+    log_info "Création de $PROVIDER_DB_ID..."
+    aws rds create-db-instance \
+        --db-instance-identifier $PROVIDER_DB_ID \
+        --db-instance-class db.t3.micro \
+        --engine postgres \
+        --engine-version 15.4 \
+        --master-username keycloak \
+        --master-user-password "$KEYCLOAK_PROVIDER_DB_PASSWORD" \
+        --allocated-storage 20 \
+        --storage-type gp3 \
+        --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
+        --vpc-security-group-ids $RDS_SG_ID \
+        --backup-retention-period 7 \
+        --no-publicly-accessible \
+        --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-provider" \
+        --region $REGION >/dev/null
+    log_success "RDS Keycloak Provider lancé"
+fi
 
-# Keycloak Consumer DB
-CONSUMER_DB_ID="${PROJECT_NAME}-keycloak-consumer-db"
-aws rds create-db-instance \
-    --db-instance-identifier $CONSUMER_DB_ID \
-    --db-instance-class db.t3.micro \
-    --engine postgres \
-    --engine-version 15.4 \
-    --master-username keycloak \
-    --master-user-password "$KEYCLOAK_CONSUMER_DB_PASSWORD" \
-    --allocated-storage 20 \
-    --storage-type gp3 \
-    --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
-    --vpc-security-group-ids $RDS_SG_ID \
-    --backup-retention-period 7 \
-    --no-publicly-accessible \
-    --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-consumer" \
-    --region $REGION 2>/dev/null || log_warn "Keycloak Consumer DB existe déjà"
-log_success "RDS Keycloak Consumer en cours de création..."
+# Create Consumer DB if needed
+if [ "$CONSUMER_STATUS" == "not-found" ]; then
+    log_info "Création de $CONSUMER_DB_ID..."
+    aws rds create-db-instance \
+        --db-instance-identifier $CONSUMER_DB_ID \
+        --db-instance-class db.t3.micro \
+        --engine postgres \
+        --engine-version 15.4 \
+        --master-username keycloak \
+        --master-user-password "$KEYCLOAK_CONSUMER_DB_PASSWORD" \
+        --allocated-storage 20 \
+        --storage-type gp3 \
+        --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
+        --vpc-security-group-ids $RDS_SG_ID \
+        --backup-retention-period 7 \
+        --no-publicly-accessible \
+        --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-consumer" \
+        --region $REGION >/dev/null
+    log_success "RDS Keycloak Consumer lancé"
+fi
 
-# OpenData DB
-OPENDATA_DB_ID="${PROJECT_NAME}-opendata-db"
-aws rds create-db-instance \
-    --db-instance-identifier $OPENDATA_DB_ID \
-    --db-instance-class db.t3.small \
-    --engine postgres \
-    --engine-version 15.4 \
-    --master-username denodo \
-    --master-user-password "$OPENDATA_DB_PASSWORD" \
-    --allocated-storage 50 \
-    --storage-type gp3 \
-    --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
-    --vpc-security-group-ids $OPENDATA_RDS_SG_ID \
-    --backup-retention-period 7 \
-    --no-publicly-accessible \
-    --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=opendata" \
-    --region $REGION 2>/dev/null || log_warn "OpenData DB existe déjà"
-log_success "RDS OpenData en cours de création..."
+# Create OpenData DB if needed
+if [ "$OPENDATA_STATUS" == "not-found" ]; then
+    log_info "Création de $OPENDATA_DB_ID..."
+    aws rds create-db-instance \
+        --db-instance-identifier $OPENDATA_DB_ID \
+        --db-instance-class db.t3.small \
+        --engine postgres \
+        --engine-version 15.4 \
+        --master-username denodo \
+        --master-user-password "$OPENDATA_DB_PASSWORD" \
+        --allocated-storage 50 \
+        --storage-type gp3 \
+        --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
+        --vpc-security-group-ids $OPENDATA_RDS_SG_ID \
+        --backup-retention-period 7 \
+        --no-publicly-accessible \
+        --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=opendata" \
+        --region $REGION >/dev/null
+    log_success "RDS OpenData lancé"
+fi
 
-log_step "3.3" "Attente de disponibilité des instances RDS"
+log_step "3.4" "Attente de disponibilité des instances RDS"
 log_info "Cela peut prendre 10-15 minutes..."
 
-aws rds wait db-instance-available --db-instance-identifier $PROVIDER_DB_ID --region $REGION &
-PID1=$!
-aws rds wait db-instance-available --db-instance-identifier $CONSUMER_DB_ID --region $REGION &
-PID2=$!
-aws rds wait db-instance-available --db-instance-identifier $OPENDATA_DB_ID --region $REGION &
-PID3=$!
+# Wait only if instances need to become available
+if [ "$PROVIDER_STATUS" != "available" ]; then
+    log_info "Attente Provider DB..."
+    aws rds wait db-instance-available --db-instance-identifier $PROVIDER_DB_ID --region $REGION 2>/dev/null || log_warn "Timeout Provider DB"
+fi
+log_success "Keycloak Provider DB disponible"
 
-wait $PID1 && log_success "Keycloak Provider DB disponible"
-wait $PID2 && log_success "Keycloak Consumer DB disponible"
-wait $PID3 && log_success "OpenData DB disponible"
+if [ "$CONSUMER_STATUS" != "available" ]; then
+    log_info "Attente Consumer DB..."
+    aws rds wait db-instance-available --db-instance-identifier $CONSUMER_DB_ID --region $REGION 2>/dev/null || log_warn "Timeout Consumer DB"
+fi
+log_success "Keycloak Consumer DB disponible"
 
-log_step "3.4" "Récupération des endpoints RDS"
-PROVIDER_DB_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $PROVIDER_DB_ID --region $REGION --query 'DBInstances[0].Endpoint.Address' --output text)
-CONSUMER_DB_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $CONSUMER_DB_ID --region $REGION --query 'DBInstances[0].Endpoint.Address' --output text)
-OPENDATA_DB_ENDPOINT=$(aws rds describe-db-instances --db-instance-identifier $OPENDATA_DB_ID --region $REGION --query 'DBInstances[0].Endpoint.Address' --output text)
+if [ "$OPENDATA_STATUS" != "available" ]; then
+    log_info "Attente OpenData DB..."
+    aws rds wait db-instance-available --db-instance-identifier $OPENDATA_DB_ID --region $REGION 2>/dev/null || log_warn "Timeout OpenData DB"
+fi
+log_success "OpenData DB disponible"
+
+log_step "3.5" "Récupération des endpoints RDS"
+
+# Retry function for getting endpoints
+get_endpoint_with_retry() {
+    local db_id=$1
+    local max_attempts=5
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier $db_id \
+            --region $REGION \
+            --query 'DBInstances[0].Endpoint.Address' \
+            --output text 2>/dev/null)
+        
+        if [ ! -z "$ENDPOINT" ] && [ "$ENDPOINT" != "None" ]; then
+            echo $ENDPOINT
+            return 0
+        fi
+        
+        log_warn "Tentative $attempt/$max_attempts - Endpoint non disponible pour $db_id, attente 10s..."
+        sleep 10
+        ((attempt++))
+    done
+    
+    log_error "Impossible de récupérer l'endpoint pour $db_id"
+    return 1
+}
+
+PROVIDER_DB_ENDPOINT=$(get_endpoint_with_retry $PROVIDER_DB_ID)
+CONSUMER_DB_ENDPOINT=$(get_endpoint_with_retry $CONSUMER_DB_ID)
+OPENDATA_DB_ENDPOINT=$(get_endpoint_with_retry $OPENDATA_DB_ID)
+
+if [ -z "$PROVIDER_DB_ENDPOINT" ] || [ -z "$CONSUMER_DB_ENDPOINT" ] || [ -z "$OPENDATA_DB_ENDPOINT" ]; then
+    log_error "Impossible de récupérer tous les endpoints RDS"
+    log_info "Vérifiez manuellement avec: aws rds describe-db-instances --region $REGION"
+    exit 1
+fi
 
 log_success "Provider DB: $PROVIDER_DB_ENDPOINT"
 log_success "Consumer DB: $CONSUMER_DB_ENDPOINT"
 log_success "OpenData DB: $OPENDATA_DB_ENDPOINT"
 
-log_step "3.5" "Mise à jour des secrets avec les endpoints"
+log_step "3.6" "Mise à jour des secrets avec les endpoints"
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/provider/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\",\"host\":\"$PROVIDER_DB_ENDPOINT\"}" \
