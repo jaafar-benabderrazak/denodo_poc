@@ -1,0 +1,111 @@
+{
+  "family": "keycloak-consumer",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "taskRoleArn": "arn:aws:iam::928902064673:role/denodo-poc-keycloak-task-role",
+  "executionRoleArn": "arn:aws:iam::928902064673:role/denodo-poc-keycloak-execution-role",
+  "containerDefinitions": [
+    {
+      "name": "keycloak",
+      "image": "quay.io/keycloak/keycloak:23.0",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "KC_DB",
+          "value": "postgres"
+        },
+        {
+          "name": "KC_DB_URL_DATABASE",
+          "value": "keycloak_consumer"
+        },
+        {
+          "name": "KC_DB_USERNAME",
+          "value": "keycloak"
+        },
+        {
+          "name": "KC_HOSTNAME_STRICT",
+          "value": "false"
+        },
+        {
+          "name": "KC_HOSTNAME_STRICT_HTTPS",
+          "value": "false"
+        },
+        {
+          "name": "KC_HTTP_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "KC_PROXY",
+          "value": "edge"
+        },
+        {
+          "name": "KC_HEALTH_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "KC_METRICS_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "KEYCLOAK_ADMIN",
+          "value": "admin"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "KC_DB_URL_HOST",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-3:928902064673:secret:denodo-poc/keycloak/consumer/db:host::"
+        },
+        {
+          "name": "KC_DB_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-3:928902064673:secret:denodo-poc/keycloak/consumer/db:password::"
+        },
+        {
+          "name": "KEYCLOAK_ADMIN_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:eu-west-3:928902064673:secret:denodo-poc/keycloak/admin:password::"
+        }
+      ],
+      "command": ["start"],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "curl -f http://localhost:8080/health/ready || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 300
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/keycloak-consumer",
+          "awslogs-region": "eu-west-3",
+          "awslogs-stream-prefix": "keycloak"
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "key": "Project",
+      "value": "denodo-poc"
+    },
+    {
+      "key": "Component",
+      "value": "keycloak-consumer"
+    },
+    {
+      "key": "Environment",
+      "value": "dev"
+    }
+  ]
+}
