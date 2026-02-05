@@ -23,6 +23,7 @@ which aws     # ✓ AWS CLI
 which jq      # ✓ JSON processor
 which curl    # ✓ HTTP client
 which psql    # ✓ PostgreSQL client
+which python3 # ✓ Python 3 (pour génération SQL)
 
 # Vérifier les credentials AWS
 aws sts get-caller-identity

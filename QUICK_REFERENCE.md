@@ -5,10 +5,15 @@
 ```bash
 cd denodo-keycloak-poc
 chmod +x scripts/*.sh
+
+# Recommended: Step-by-step with validation
+./scripts/deploy-step-by-step.sh
+
+# Or automatic deployment
 ./scripts/deploy-denodo-keycloak.sh
 ```
 
-**Time:** ~45 minutes | **Cost:** ~$130/month
+**Time:** ~30 minutes | **Cost:** ~$130/month
 
 ---
 

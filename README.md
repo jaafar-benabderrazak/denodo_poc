@@ -20,7 +20,8 @@ This project deploys a complete Keycloak federation setup for Denodo data virtua
 - AWS CLI v2+ configured
 - jq (JSON processor)
 - curl
-- PostgreSQL client (psql) - optional for database access
+- python3 (for SQL generation)
+- PostgreSQL client (psql) - required for data loading
 
 # AWS Permissions Required
 - EC2 (VPC, Security Groups, Subnets)
