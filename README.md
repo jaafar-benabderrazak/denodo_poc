@@ -36,7 +36,7 @@ This project deploys a complete Keycloak federation setup for Denodo data virtua
 
 ### Deployment Steps
 
-#### Option 1: CloudShell One-Command Deployment (Recommended)
+#### Option 1: Déploiement Étape par Étape avec Validation (Recommandé)
 
 ```bash
 # Upload this folder to CloudShell
@@ -45,28 +45,49 @@ cd denodo-keycloak-poc
 # Make script executable
 chmod +x scripts/*.sh
 
-# Run complete deployment
+# Run step-by-step deployment with validation pauses
+./scripts/deploy-step-by-step.sh
+```
+
+**Avantages:**
+- ✓ Validation manuelle après chaque phase
+- ✓ Alimentation automatique des données OpenData (~36,000 communes + 1,000 entreprises)
+- ✓ Messages colorés et progression claire
+- ✓ Possibilité d'arrêter à tout moment
+
+**Phases couvertes:**
+1. Phase 0: Vérification des prérequis (AWS CLI, VPC, credentials)
+2. Phase 1: Création des Security Groups (ALB, ECS, RDS)
+3. Phase 2: Génération et stockage des secrets (Secrets Manager)
+4. Phase 3: Création des 3 bases RDS PostgreSQL (10-15 min)
+5. Phase 4: Initialisation du schéma OpenData
+6. Phase 5: Alimentation des données (communes + entreprises)
+7. Phase 6: Sauvegarde des informations de déploiement
+
+**Time:** ~30 minutes avec pauses de validation
+
+#### Option 2: Déploiement Automatique Complet
+
+```bash
+# Infrastructure complète sans pauses
 ./scripts/deploy-denodo-keycloak.sh
 ```
 
-**Time:** ~45 minutes total
+**Time:** ~20 minutes (sans alimentation des données)
 
-#### Option 2: Step-by-Step Deployment
+#### Option 3: Déploiement Manuel Phase par Phase
 
 ```bash
-# Step 1: Infrastructure (20 min)
+# Phase 1: Infrastructure
 ./scripts/deploy-denodo-keycloak.sh
 
-# Step 2: ECS Cluster & Keycloak (15 min)  
+# Phase 2: ECS Cluster & Keycloak (à créer)
 ./scripts/deploy-ecs-keycloak.sh
 
-# Step 3: Load OpenData (5 min)
-./scripts/load-opendata.sh
-
-# Step 4: Configure OIDC Federation (2 min)
+# Phase 3: Configure OIDC Federation (à créer)
 ./scripts/configure-keycloak.sh
 
-# Step 5: Deploy Lambda API (3 min)
+# Phase 4: Deploy Lambda API (à créer)
 ./scripts/deploy-lambda-api.sh
 ```
 
