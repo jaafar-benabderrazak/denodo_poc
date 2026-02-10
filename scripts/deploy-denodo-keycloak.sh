@@ -23,6 +23,9 @@
 
 set -e
 
+# Error trap for debugging - prints the line number where the script fails
+trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO. Command: $BASH_COMMAND\033[0m"' ERR
+
 # Configuration
 REGION="eu-west-3"
 VPC_ID="vpc-08ffb9d90f07533d0"
@@ -50,7 +53,7 @@ TOTAL_STEPS=20
 CURRENT_STEP=0
 
 step() {
-    ((CURRENT_STEP++))
+    CURRENT_STEP=$((CURRENT_STEP + 1))
     log_step $CURRENT_STEP $TOTAL_STEPS "$1"
 }
 
