@@ -387,20 +387,31 @@ log_phase "PHASE 5: CREATING APPLICATION LOAD BALANCER"
 
 log_step "5.1" "Creating ALB"
 
-ALB_ARN=$(aws elbv2 create-load-balancer \
-    --name keycloak-alb \
-    --subnets "$PUBLIC_SUBNET_1" "$PUBLIC_SUBNET_2" \
-    --security-groups "$ALB_SG_ID" \
-    --scheme internet-facing \
-    --type application \
-    --ip-address-type ipv4 \
-    --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=dev \
+log_info "Public subnet 1: $PUBLIC_SUBNET_1"
+log_info "Public subnet 2: $PUBLIC_SUBNET_2"
+log_info "ALB SG: $ALB_SG_ID"
+
+# Check if ALB already exists
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+    --names keycloak-alb \
     --region "$REGION" \
-    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || \
-    aws elbv2 describe-load-balancers \
-        --names keycloak-alb \
+    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+
+if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" == "None" ]; then
+    log_info "Creating new ALB..."
+    ALB_ARN=$(aws elbv2 create-load-balancer \
+        --name keycloak-alb \
+        --subnets "$PUBLIC_SUBNET_1" "$PUBLIC_SUBNET_2" \
+        --security-groups "$ALB_SG_ID" \
+        --scheme internet-facing \
+        --type application \
+        --ip-address-type ipv4 \
+        --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=dev \
         --region "$REGION" \
         --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+else
+    log_warn "ALB keycloak-alb already exists"
+fi
 
 ALB_DNS=$(aws elbv2 describe-load-balancers \
     --load-balancer-arns "$ALB_ARN" \
