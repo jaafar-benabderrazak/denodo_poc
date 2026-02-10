@@ -580,8 +580,6 @@ aws ecs create-service \
     --launch-type FARGATE \
     --platform-version LATEST \
     --network-configuration "awsvpcConfiguration={subnets=[$PUBLIC_SUBNET_1,$PUBLIC_SUBNET_2],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
-    --load-balancers "targetGroupArn=$CONSUMER_TG_ARN,containerName=keycloak,containerPort=8080" \
-    --health-check-grace-period-seconds 300 \
     --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
     --tags key=Project,value="$PROJECT_NAME" key=Component,value=keycloak-consumer \
     --region "$REGION" 2>&1 || \
