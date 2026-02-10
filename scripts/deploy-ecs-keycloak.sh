@@ -257,7 +257,7 @@ cat > /tmp/keycloak-provider-task.json <<EOF
       ],
       "environment": [
         {"name": "KC_DB", "value": "postgres"},
-        {"name": "KC_DB_URL_DATABASE", "value": "keycloak_provider"},
+        {"name": "KC_DB_URL_DATABASE", "value": "postgres"},
         {"name": "KC_DB_USERNAME", "value": "keycloak"},
         {"name": "KC_DB_URL_HOST", "value": "${PROVIDER_DB_ENDPOINT}"},
         {"name": "KC_HOSTNAME_STRICT", "value": "false"},
@@ -330,7 +330,7 @@ cat > /tmp/keycloak-consumer-task.json <<EOF
       ],
       "environment": [
         {"name": "KC_DB", "value": "postgres"},
-        {"name": "KC_DB_URL_DATABASE", "value": "keycloak_consumer"},
+        {"name": "KC_DB_URL_DATABASE", "value": "postgres"},
         {"name": "KC_DB_USERNAME", "value": "keycloak"},
         {"name": "KC_DB_URL_HOST", "value": "${CONSUMER_DB_ENDPOINT}"},
         {"name": "KC_HOSTNAME_STRICT", "value": "false"},
