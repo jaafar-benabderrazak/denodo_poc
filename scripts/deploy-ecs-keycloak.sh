@@ -104,13 +104,13 @@ aws iam create-role \
     --role-name "$EXECUTION_ROLE_NAME" \
     --assume-role-policy-document file:///tmp/ecs-trust-policy.json \
     --tags Key=Project,Value="$PROJECT_NAME" \
-    2>/dev/null || log_warn "Execution role already exists"
+    2>&1 || log_warn "Execution role already exists"
 
 # Attach managed policy for ECS execution
 aws iam attach-role-policy \
     --role-name "$EXECUTION_ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy \
-    2>/dev/null || log_warn "ECS execution policy already attached"
+    2>&1 || log_warn "ECS execution policy already attached"
 
 # Custom policy for Secrets Manager access
 cat > /tmp/secrets-policy.json <<EOF
@@ -131,13 +131,13 @@ EOF
 SECRETS_POLICY_ARN=$(aws iam create-policy \
     --policy-name "${PROJECT_NAME}-secrets-access" \
     --policy-document file:///tmp/secrets-policy.json \
-    --query 'Policy.Arn' --output text 2>/dev/null || \
+    --query 'Policy.Arn' --output text 2>&1 || \
     echo "arn:aws:iam::${ACCOUNT_ID}:policy/${PROJECT_NAME}-secrets-access")
 
 aws iam attach-role-policy \
     --role-name "$EXECUTION_ROLE_NAME" \
     --policy-arn "$SECRETS_POLICY_ARN" \
-    2>/dev/null || log_warn "Secrets policy already attached"
+    2>&1 || log_warn "Secrets policy already attached"
 
 log_success "Execution role: $EXECUTION_ROLE_NAME"
 
@@ -147,7 +147,7 @@ aws iam create-role \
     --role-name "$TASK_ROLE_NAME" \
     --assume-role-policy-document file:///tmp/ecs-trust-policy.json \
     --tags Key=Project,Value="$PROJECT_NAME" \
-    2>/dev/null || log_warn "Task role already exists"
+    2>&1 || log_warn "Task role already exists"
 
 # Task role needs minimal permissions (Keycloak doesn't call AWS APIs)
 log_success "Task role: $TASK_ROLE_NAME"
@@ -171,24 +171,24 @@ aws logs create-log-group \
     --log-group-name "/ecs/keycloak-provider" \
     --region "$REGION" \
     --tags Project="$PROJECT_NAME" \
-    2>/dev/null || log_warn "Provider log group already exists"
+    2>&1 || log_warn "Provider log group already exists"
 
 aws logs create-log-group \
     --log-group-name "/ecs/keycloak-consumer" \
     --region "$REGION" \
     --tags Project="$PROJECT_NAME" \
-    2>/dev/null || log_warn "Consumer log group already exists"
+    2>&1 || log_warn "Consumer log group already exists"
 
 # Set retention to 30 days
 aws logs put-retention-policy \
     --log-group-name "/ecs/keycloak-provider" \
     --retention-in-days 30 \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 aws logs put-retention-policy \
     --log-group-name "/ecs/keycloak-consumer" \
     --retention-in-days 30 \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 log_success "Log groups created with 30-day retention"
 
@@ -207,7 +207,7 @@ aws ecs create-cluster \
     --settings name=containerInsights,value=enabled \
     --tags key=Project,value="$PROJECT_NAME" key=Environment,value=dev \
     --region "$REGION" \
-    2>/dev/null || log_warn "ECS cluster already exists"
+    2>&1 || log_warn "ECS cluster already exists"
 
 log_success "ECS Cluster: $ECS_CLUSTER_NAME"
 
@@ -222,7 +222,7 @@ get_secret_arn() {
     aws secretsmanager describe-secret \
         --secret-id "$1" \
         --region "$REGION" \
-        --query 'ARN' --output text 2>/dev/null
+        --query 'ARN' --output text 2>&1
 }
 
 PROVIDER_DB_SECRET_ARN=$(get_secret_arn "${PROJECT_NAME}/keycloak/provider/db")
@@ -395,7 +395,7 @@ log_info "ALB SG: $ALB_SG_ID"
 ALB_ARN=$(aws elbv2 describe-load-balancers \
     --names keycloak-alb \
     --region "$REGION" \
-    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>&1 || echo "")
 
 if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" == "None" ]; then
     log_info "Creating new ALB..."
@@ -439,7 +439,7 @@ PROVIDER_TG_ARN=$(aws elbv2 create-target-group \
     --matcher HttpCode=200 \
     --tags Key=Project,Value="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || \
+    --query 'TargetGroups[0].TargetGroupArn' --output text 2>&1 || \
     aws elbv2 describe-target-groups \
         --names keycloak-provider-tg \
         --region "$REGION" \
@@ -463,7 +463,7 @@ CONSUMER_TG_ARN=$(aws elbv2 create-target-group \
     --matcher HttpCode=200 \
     --tags Key=Project,Value="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || \
+    --query 'TargetGroups[0].TargetGroupArn' --output text 2>&1 || \
     aws elbv2 describe-target-groups \
         --names keycloak-consumer-tg \
         --region "$REGION" \
@@ -480,7 +480,7 @@ LISTENER_ARN=$(aws elbv2 create-listener \
     --port 80 \
     --default-actions Type=fixed-response,FixedResponseConfig="{StatusCode=404,ContentType=text/plain,MessageBody=Not Found}" \
     --region "$REGION" \
-    --query 'Listeners[0].ListenerArn' --output text 2>/dev/null || \
+    --query 'Listeners[0].ListenerArn' --output text 2>&1 || \
     aws elbv2 describe-listeners \
         --load-balancer-arn "$ALB_ARN" \
         --region "$REGION" \
@@ -494,7 +494,7 @@ aws elbv2 create-rule \
     --priority 10 \
     --conditions Field=path-pattern,Values='/auth/realms/denodo-idp/*' \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
-    --region "$REGION" 2>/dev/null || log_warn "Provider path rule already exists"
+    --region "$REGION" 2>&1 || log_warn "Provider path rule already exists"
 
 # Rule 2: Route /auth/realms/master/* to Provider (admin console)
 aws elbv2 create-rule \
@@ -502,7 +502,7 @@ aws elbv2 create-rule \
     --priority 15 \
     --conditions Field=path-pattern,Values='/auth/admin/*' \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
-    --region "$REGION" 2>/dev/null || log_warn "Admin path rule already exists"
+    --region "$REGION" 2>&1 || log_warn "Admin path rule already exists"
 
 # Rule 3: Route /auth/realms/denodo-consumer/* to Consumer
 aws elbv2 create-rule \
@@ -510,7 +510,7 @@ aws elbv2 create-rule \
     --priority 20 \
     --conditions Field=path-pattern,Values='/auth/realms/denodo-consumer/*' \
     --actions Type=forward,TargetGroupArn="$CONSUMER_TG_ARN" \
-    --region "$REGION" 2>/dev/null || log_warn "Consumer path rule already exists"
+    --region "$REGION" 2>&1 || log_warn "Consumer path rule already exists"
 
 # Rule 4: Route /health/* to Provider (general health)
 aws elbv2 create-rule \
@@ -518,7 +518,7 @@ aws elbv2 create-rule \
     --priority 30 \
     --conditions Field=path-pattern,Values='/health/*' \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
-    --region "$REGION" 2>/dev/null || log_warn "Health path rule already exists"
+    --region "$REGION" 2>&1 || log_warn "Health path rule already exists"
 
 log_success "Path-based routing rules configured"
 
@@ -542,7 +542,7 @@ aws ecs create-service \
     --health-check-grace-period-seconds 300 \
     --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
     --tags key=Project,value="$PROJECT_NAME" key=Component,value=keycloak-provider \
-    --region "$REGION" 2>/dev/null || log_warn "Provider service already exists"
+    --region "$REGION" 2>&1 || log_warn "Provider service already exists"
 
 log_success "Keycloak Provider service created"
 
@@ -560,7 +560,7 @@ aws ecs create-service \
     --health-check-grace-period-seconds 300 \
     --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
     --tags key=Project,value="$PROJECT_NAME" key=Component,value=keycloak-consumer \
-    --region "$REGION" 2>/dev/null || log_warn "Consumer service already exists"
+    --region "$REGION" 2>&1 || log_warn "Consumer service already exists"
 
 log_success "Keycloak Consumer service created"
 
@@ -570,7 +570,7 @@ log_info "⏱ This may take 5-10 minutes (Keycloak startup time)..."
 aws ecs wait services-stable \
     --cluster "$ECS_CLUSTER_NAME" \
     --services keycloak-provider keycloak-consumer \
-    --region "$REGION" 2>/dev/null || log_warn "Timeout waiting for services (they may still be starting)"
+    --region "$REGION" 2>&1 || log_warn "Timeout waiting for services (they may still be starting)"
 
 log_success "ECS services deployed"
 

@@ -95,7 +95,7 @@ echo "▶ Valid API Requests"
 for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
     HTTP_STATUS=$(curl -s -o /tmp/auth_response.json -w "%{http_code}" \
         -H "X-API-Key: ${API_KEY}" \
-        "${PERMISSIONS_URL}/${USER_EMAIL}/permissions" 2>/dev/null)
+        "${PERMISSIONS_URL}/${USER_EMAIL}/permissions" 2>&1)
 
     assert "GET /${USER_EMAIL}/permissions returns 200" "200" "$HTTP_STATUS"
 
@@ -135,7 +135,7 @@ echo ""
 echo "▶ Security: Missing API Key"
 
 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null)
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>&1)
 
 assert "Request without API key returns 403" "403" "$HTTP_STATUS"
 
@@ -148,7 +148,7 @@ echo "▶ Security: Invalid API Key"
 
 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "X-API-Key: invalid-key-12345" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null)
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>&1)
 
 assert "Request with invalid API key returns 403" "403" "$HTTP_STATUS"
 
@@ -161,7 +161,7 @@ echo "▶ Unknown User Handling"
 
 HTTP_STATUS=$(curl -s -o /tmp/auth_unknown.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
-    "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>/dev/null)
+    "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>&1)
 
 assert "Unknown user returns 404" "404" "$HTTP_STATUS"
 
@@ -174,7 +174,7 @@ echo "▶ Analyst Permission Scope"
 
 HTTP_STATUS=$(curl -s -o /tmp/auth_analyst.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null)
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>&1)
 
 if [ "$HTTP_STATUS" == "200" ]; then
     ANALYST_RESPONSE=$(cat /tmp/auth_analyst.json)

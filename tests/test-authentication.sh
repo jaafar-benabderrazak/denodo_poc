@@ -85,10 +85,10 @@ ADMIN_PASSWORD=$(aws secretsmanager get-secret-value \
 echo ""
 echo "▶ Health Endpoints"
 
-HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/ready" 2>/dev/null || echo "000")
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/ready" 2>&1 || echo "000")
 assert "Keycloak health/ready returns 200" "200" "$HEALTH_STATUS"
 
-HEALTH_LIVE=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/live" 2>/dev/null || echo "000")
+HEALTH_LIVE=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/live" 2>&1 || echo "000")
 assert "Keycloak health/live returns 200" "200" "$HEALTH_LIVE"
 
 ###############################################################################
@@ -98,7 +98,7 @@ assert "Keycloak health/live returns 200" "200" "$HEALTH_LIVE"
 echo ""
 echo "▶ Provider Realm (denodo-idp)"
 
-PROVIDER_WELLKNOWN=$(curl -s "${KC_BASE_URL}/auth/realms/denodo-idp/.well-known/openid-configuration" 2>/dev/null)
+PROVIDER_WELLKNOWN=$(curl -s "${KC_BASE_URL}/auth/realms/denodo-idp/.well-known/openid-configuration" 2>&1)
 
 PROVIDER_ISSUER=$(echo "$PROVIDER_WELLKNOWN" | jq -r '.issuer // empty')
 assert_not_empty "Provider OIDC issuer is set" "$PROVIDER_ISSUER"
@@ -122,7 +122,7 @@ assert_not_empty "Provider jwks_uri is set" "$PROVIDER_JWKS"
 echo ""
 echo "▶ Consumer Realm (denodo-consumer)"
 
-CONSUMER_WELLKNOWN=$(curl -s "${KC_BASE_URL}/auth/realms/denodo-consumer/.well-known/openid-configuration" 2>/dev/null)
+CONSUMER_WELLKNOWN=$(curl -s "${KC_BASE_URL}/auth/realms/denodo-consumer/.well-known/openid-configuration" 2>&1)
 
 CONSUMER_ISSUER=$(echo "$CONSUMER_WELLKNOWN" | jq -r '.issuer // empty')
 assert_not_empty "Consumer OIDC issuer is set" "$CONSUMER_ISSUER"
@@ -142,7 +142,7 @@ ADMIN_TOKEN_RESPONSE=$(curl -s -X POST "${KC_BASE_URL}/auth/realms/master/protoc
     -d "username=admin" \
     -d "password=${ADMIN_PASSWORD}" \
     -d "grant_type=password" \
-    -d "client_id=admin-cli" 2>/dev/null)
+    -d "client_id=admin-cli" 2>&1)
 
 ADMIN_TOKEN=$(echo "$ADMIN_TOKEN_RESPONSE" | jq -r '.access_token // empty')
 assert_not_empty "Admin token grant returns access_token" "$ADMIN_TOKEN"
@@ -176,7 +176,7 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
         -d "password=${PASSWORD}" \
         -d "grant_type=password" \
         -d "client_id=denodo-consumer" \
-        -d "client_secret=${CLIENT_SECRET}" 2>/dev/null)
+        -d "client_secret=${CLIENT_SECRET}" 2>&1)
 
     USER_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
     assert_not_empty "User $USER_EMAIL can authenticate" "$USER_TOKEN"

@@ -99,7 +99,7 @@ for FAMILY in keycloak-provider keycloak-consumer; do
     TASK_DEFS=$(aws ecs list-task-definitions \
         --family-prefix "$FAMILY" \
         --region "$REGION" \
-        --query 'taskDefinitionArns[]' --output text 2>/dev/null)
+        --query 'taskDefinitionArns[]' --output text 2>&1)
     for TD in $TASK_DEFS; do
         aws ecs deregister-task-definition --task-definition "$TD" --region "$REGION" > /dev/null 2>&1
         log_success "Deregistered $TD"
@@ -119,14 +119,14 @@ log_phase "PHASE 2: DELETING ALB RESOURCES"
 ALB_ARN=$(aws elbv2 describe-load-balancers \
     --names keycloak-alb \
     --region "$REGION" \
-    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>&1 || echo "")
 
 if [ ! -z "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
     # Delete listeners first
     LISTENERS=$(aws elbv2 describe-listeners \
         --load-balancer-arn "$ALB_ARN" \
         --region "$REGION" \
-        --query 'Listeners[].ListenerArn' --output text 2>/dev/null)
+        --query 'Listeners[].ListenerArn' --output text 2>&1)
     for LISTENER in $LISTENERS; do
         aws elbv2 delete-listener --listener-arn "$LISTENER" --region "$REGION" > /dev/null 2>&1
         log_success "Deleted listener"
@@ -138,7 +138,7 @@ if [ ! -z "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
 
     # Wait for ALB to be fully deleted before removing target groups
     log_info "Waiting for ALB deletion to complete..."
-    aws elbv2 wait load-balancers-deleted --load-balancer-arns "$ALB_ARN" --region "$REGION" 2>/dev/null || sleep 30
+    aws elbv2 wait load-balancers-deleted --load-balancer-arns "$ALB_ARN" --region "$REGION" 2>&1 || sleep 30
 else
     log_warn "ALB keycloak-alb not found"
 fi
@@ -148,7 +148,7 @@ for TG_NAME in keycloak-provider-tg keycloak-consumer-tg; do
     TG_ARN=$(aws elbv2 describe-target-groups \
         --names "$TG_NAME" \
         --region "$REGION" \
-        --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
+        --query 'TargetGroups[0].TargetGroupArn' --output text 2>&1 || echo "")
     if [ ! -z "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then
         aws elbv2 delete-target-group --target-group-arn "$TG_ARN" --region "$REGION" > /dev/null 2>&1
         log_success "Deleted target group $TG_NAME"
@@ -173,12 +173,12 @@ aws lambda delete-function \
 # Delete API Gateway
 API_ID=$(aws apigateway get-rest-apis \
     --region "$REGION" \
-    --query "items[?name=='${API_NAME}'].id" --output text 2>/dev/null)
+    --query "items[?name=='${API_NAME}'].id" --output text 2>&1)
 if [ ! -z "$API_ID" ] && [ "$API_ID" != "None" ]; then
     # Delete usage plans first
     USAGE_PLANS=$(aws apigateway get-usage-plans \
         --region "$REGION" \
-        --query "items[?name=='${PROJECT_NAME}-usage-plan'].id" --output text 2>/dev/null)
+        --query "items[?name=='${PROJECT_NAME}-usage-plan'].id" --output text 2>&1)
     for UP_ID in $USAGE_PLANS; do
         # Remove API stages from usage plan
         aws apigateway update-usage-plan \
@@ -193,7 +193,7 @@ if [ ! -z "$API_ID" ] && [ "$API_ID" != "None" ]; then
     API_KEY_IDS=$(aws apigateway get-api-keys \
         --name-query "${PROJECT_NAME}-api-key" \
         --region "$REGION" \
-        --query 'items[].id' --output text 2>/dev/null)
+        --query 'items[].id' --output text 2>&1)
     for KEY_ID in $API_KEY_IDS; do
         aws apigateway delete-api-key --api-key "$KEY_ID" --region "$REGION" > /dev/null 2>&1
         log_success "Deleted API key"
@@ -225,7 +225,7 @@ log_info "RDS deletion is asynchronous. Waiting for instances to be deleted..."
 for DB_ID in keycloak-provider-db keycloak-consumer-db opendata-db; do
     aws rds wait db-instance-deleted \
         --db-instance-identifier "$DB_ID" \
-        --region "$REGION" 2>/dev/null || log_warn "Timeout waiting for $DB_ID deletion"
+        --region "$REGION" 2>&1 || log_warn "Timeout waiting for $DB_ID deletion"
 done
 
 # Delete DB subnet group
@@ -242,7 +242,7 @@ log_phase "PHASE 5: DELETING SECRETS"
 
 SECRETS=$(aws secretsmanager list-secrets \
     --region "$REGION" \
-    --query "SecretList[?starts_with(Name, '${PROJECT_NAME}/')].Name" --output text 2>/dev/null)
+    --query "SecretList[?starts_with(Name, '${PROJECT_NAME}/')].Name" --output text 2>&1)
 
 for SECRET in $SECRETS; do
     aws secretsmanager delete-secret \
@@ -267,13 +267,13 @@ for SG_NAME in "${PROJECT_NAME}-ecs-sg" "${PROJECT_NAME}-rds-sg" "${PROJECT_NAME
     SG_ID=$(aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${SG_NAME}" "Name=vpc-id,Values=${VPC_ID}" \
         --region "$REGION" \
-        --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+        --query 'SecurityGroups[0].GroupId' --output text 2>&1)
 
     if [ ! -z "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
         # Remove all ingress/egress rules referencing this SG from other SGs
         aws ec2 revoke-security-group-ingress \
             --group-id "$SG_ID" \
-            --ip-permissions "$(aws ec2 describe-security-groups --group-ids "$SG_ID" --region "$REGION" --query 'SecurityGroups[0].IpPermissions' --output json 2>/dev/null)" \
+            --ip-permissions "$(aws ec2 describe-security-groups --group-ids "$SG_ID" --region "$REGION" --query 'SecurityGroups[0].IpPermissions' --output json 2>&1)" \
             --region "$REGION" > /dev/null 2>&1 || true
 
         aws ec2 delete-security-group --group-id "$SG_ID" --region "$REGION" > /dev/null 2>&1 \
@@ -297,18 +297,18 @@ delete_role_with_policies() {
     # Detach managed policies
     POLICIES=$(aws iam list-attached-role-policies \
         --role-name "$role_name" \
-        --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null)
+        --query 'AttachedPolicies[].PolicyArn' --output text 2>&1)
     for POLICY_ARN in $POLICIES; do
-        aws iam detach-role-policy --role-name "$role_name" --policy-arn "$POLICY_ARN" 2>/dev/null
+        aws iam detach-role-policy --role-name "$role_name" --policy-arn "$POLICY_ARN" 2>&1
     done
 
     # Delete inline policies
-    INLINE=$(aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames[]' --output text 2>/dev/null)
+    INLINE=$(aws iam list-role-policies --role-name "$role_name" --query 'PolicyNames[]' --output text 2>&1)
     for POLICY_NAME in $INLINE; do
-        aws iam delete-role-policy --role-name "$role_name" --policy-name "$POLICY_NAME" 2>/dev/null
+        aws iam delete-role-policy --role-name "$role_name" --policy-name "$POLICY_NAME" 2>&1
     done
 
-    aws iam delete-role --role-name "$role_name" 2>/dev/null \
+    aws iam delete-role --role-name "$role_name" 2>&1 \
         && log_success "Deleted role $role_name" || log_warn "Role $role_name not found"
 }
 
@@ -319,7 +319,7 @@ delete_role_with_policies "${PROJECT_NAME}-lambda-execution-role"
 # Delete custom policies
 for POLICY_NAME in "${PROJECT_NAME}-secrets-access" "${PROJECT_NAME}-lambda-secrets-access"; do
     POLICY_ARN="arn:aws:iam::${ACCOUNT_ID}:policy/${POLICY_NAME}"
-    aws iam delete-policy --policy-arn "$POLICY_ARN" 2>/dev/null \
+    aws iam delete-policy --policy-arn "$POLICY_ARN" 2>&1 \
         && log_success "Deleted policy $POLICY_NAME" || log_warn "Policy $POLICY_NAME not found"
 done
 

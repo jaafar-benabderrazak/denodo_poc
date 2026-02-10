@@ -87,13 +87,13 @@ aws iam create-role \
     --role-name "$LAMBDA_ROLE_NAME" \
     --assume-role-policy-document file:///tmp/lambda-trust-policy.json \
     --tags Key=Project,Value="$PROJECT_NAME" \
-    2>/dev/null || log_warn "Lambda role already exists"
+    2>&1 || log_warn "Lambda role already exists"
 
 # Attach basic Lambda execution policy (CloudWatch Logs)
 aws iam attach-role-policy \
     --role-name "$LAMBDA_ROLE_NAME" \
     --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole \
-    2>/dev/null || log_warn "Basic execution policy already attached"
+    2>&1 || log_warn "Basic execution policy already attached"
 
 # Custom policy for Secrets Manager
 cat > /tmp/lambda-secrets-policy.json <<EOF
@@ -114,13 +114,13 @@ EOF
 LAMBDA_SECRETS_POLICY_ARN=$(aws iam create-policy \
     --policy-name "${PROJECT_NAME}-lambda-secrets-access" \
     --policy-document file:///tmp/lambda-secrets-policy.json \
-    --query 'Policy.Arn' --output text 2>/dev/null || \
+    --query 'Policy.Arn' --output text 2>&1 || \
     echo "arn:aws:iam::${ACCOUNT_ID}:policy/${PROJECT_NAME}-lambda-secrets-access")
 
 aws iam attach-role-policy \
     --role-name "$LAMBDA_ROLE_NAME" \
     --policy-arn "$LAMBDA_SECRETS_POLICY_ARN" \
-    2>/dev/null || log_warn "Secrets policy already attached"
+    2>&1 || log_warn "Secrets policy already attached"
 
 LAMBDA_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${LAMBDA_ROLE_NAME}"
 log_success "Lambda role: $LAMBDA_ROLE_ARN"
@@ -138,12 +138,12 @@ log_phase "PHASE 2: CLOUDWATCH LOG GROUP"
 aws logs create-log-group \
     --log-group-name "/aws/lambda/${LAMBDA_FUNCTION_NAME}" \
     --region "$REGION" \
-    2>/dev/null || log_warn "Lambda log group already exists"
+    2>&1 || log_warn "Lambda log group already exists"
 
 aws logs put-retention-policy \
     --log-group-name "/aws/lambda/${LAMBDA_FUNCTION_NAME}" \
     --retention-in-days 30 \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 log_success "Log group /aws/lambda/${LAMBDA_FUNCTION_NAME} created"
 
@@ -174,7 +174,7 @@ log_step "3.2" "Creating/updating Lambda function"
 API_KEY_SECRET_ARN=$(aws secretsmanager describe-secret \
     --secret-id "${PROJECT_NAME}/api/auth-key" \
     --region "$REGION" \
-    --query 'ARN' --output text 2>/dev/null)
+    --query 'ARN' --output text 2>&1)
 
 # Try to create, update if exists
 aws lambda create-function \
@@ -188,7 +188,7 @@ aws lambda create-function \
     --environment "Variables={SECRET_NAME=${PROJECT_NAME}/api/auth-key,REGION=${REGION}}" \
     --tags Project="$PROJECT_NAME",Environment=dev \
     --region "$REGION" \
-    2>/dev/null || \
+    2>&1 || \
 aws lambda update-function-code \
     --function-name "$LAMBDA_FUNCTION_NAME" \
     --zip-file "fileb://$LAMBDA_ZIP" \
@@ -197,7 +197,7 @@ aws lambda update-function-code \
 # Wait for function to be active
 aws lambda wait function-active-v2 \
     --function-name "$LAMBDA_FUNCTION_NAME" \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 LAMBDA_ARN=$(aws lambda get-function \
     --function-name "$LAMBDA_FUNCTION_NAME" \
@@ -220,7 +220,7 @@ API_ID=$(aws apigateway create-rest-api \
     --endpoint-configuration types=REGIONAL \
     --tags Project="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-rest-apis \
         --region "$REGION" \
         --query "items[?name=='${API_NAME}'].id" --output text)
@@ -241,7 +241,7 @@ API_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$ROOT_RESOURCE_ID" \
     --path-part "api" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -253,7 +253,7 @@ V1_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$API_RESOURCE_ID" \
     --path-part "v1" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -265,7 +265,7 @@ USERS_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$V1_RESOURCE_ID" \
     --path-part "users" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -277,7 +277,7 @@ USERID_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$USERS_RESOURCE_ID" \
     --path-part "{userId}" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -289,7 +289,7 @@ PERMISSIONS_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$USERID_RESOURCE_ID" \
     --path-part "permissions" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -307,7 +307,7 @@ aws apigateway put-method \
     --authorization-type NONE \
     --api-key-required \
     --request-parameters "method.request.path.userId=true,method.request.header.X-API-Key=true" \
-    --region "$REGION" 2>/dev/null || log_warn "GET method already exists"
+    --region "$REGION" 2>&1 || log_warn "GET method already exists"
 
 # Lambda integration
 aws apigateway put-integration \
@@ -317,7 +317,7 @@ aws apigateway put-integration \
     --type AWS_PROXY \
     --integration-http-method POST \
     --uri "arn:aws:apigateway:${REGION}:lambda:path/2015-03-31/functions/${LAMBDA_ARN}/invocations" \
-    --region "$REGION" 2>/dev/null || log_warn "Integration already exists"
+    --region "$REGION" 2>&1 || log_warn "Integration already exists"
 
 log_success "GET method with Lambda proxy integration configured"
 
@@ -328,7 +328,7 @@ aws apigateway put-method \
     --resource-id "$PERMISSIONS_RESOURCE_ID" \
     --http-method OPTIONS \
     --authorization-type NONE \
-    --region "$REGION" 2>/dev/null || log_warn "OPTIONS method already exists"
+    --region "$REGION" 2>&1 || log_warn "OPTIONS method already exists"
 
 aws apigateway put-integration \
     --rest-api-id "$API_ID" \
@@ -336,7 +336,7 @@ aws apigateway put-integration \
     --http-method OPTIONS \
     --type MOCK \
     --request-templates '{"application/json": "{\"statusCode\": 200}"}' \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 aws apigateway put-method-response \
     --rest-api-id "$API_ID" \
@@ -344,7 +344,7 @@ aws apigateway put-method-response \
     --http-method OPTIONS \
     --status-code 200 \
     --response-parameters "method.response.header.Access-Control-Allow-Headers=false,method.response.header.Access-Control-Allow-Methods=false,method.response.header.Access-Control-Allow-Origin=false" \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 aws apigateway put-integration-response \
     --rest-api-id "$API_ID" \
@@ -352,7 +352,7 @@ aws apigateway put-integration-response \
     --http-method OPTIONS \
     --status-code 200 \
     --response-parameters '{"method.response.header.Access-Control-Allow-Headers":"'"'"'Content-Type,X-API-Key'"'"'","method.response.header.Access-Control-Allow-Methods":"'"'"'GET,OPTIONS'"'"'","method.response.header.Access-Control-Allow-Origin":"'"'"'*'"'"'"}' \
-    --region "$REGION" 2>/dev/null || true
+    --region "$REGION" 2>&1 || true
 
 log_success "CORS support configured"
 
@@ -364,7 +364,7 @@ aws lambda add-permission \
     --action lambda:InvokeFunction \
     --principal apigateway.amazonaws.com \
     --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" \
-    --region "$REGION" 2>/dev/null || log_warn "Lambda permission already exists"
+    --region "$REGION" 2>&1 || log_warn "Lambda permission already exists"
 
 log_success "Lambda invoke permission granted"
 
@@ -383,7 +383,7 @@ API_KEY_ID=$(aws apigateway create-api-key \
     --value "$API_KEY_VALUE" \
     --tags Project="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-api-keys \
         --name-query "${PROJECT_NAME}-api-key" \
         --region "$REGION" \
@@ -398,7 +398,7 @@ USAGE_PLAN_ID=$(aws apigateway create-usage-plan \
     --throttle burstLimit=100,rateLimit=50 \
     --quota limit=10000,period=MONTH \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
+    --query 'id' --output text 2>&1 || \
     aws apigateway get-usage-plans \
         --region "$REGION" \
         --query "items[?name=='${PROJECT_NAME}-usage-plan'].id" --output text)
@@ -410,7 +410,7 @@ aws apigateway create-usage-plan-key \
     --usage-plan-id "$USAGE_PLAN_ID" \
     --key-id "$API_KEY_ID" \
     --key-type API_KEY \
-    --region "$REGION" 2>/dev/null || log_warn "API key already associated"
+    --region "$REGION" 2>&1 || log_warn "API key already associated"
 
 log_step "4.7" "Deploying API to 'dev' stage"
 
@@ -424,7 +424,7 @@ aws apigateway create-deployment \
 aws apigateway update-usage-plan \
     --usage-plan-id "$USAGE_PLAN_ID" \
     --patch-operations "op=add,path=/apiStages,value=${API_ID}:dev" \
-    --region "$REGION" 2>/dev/null || log_warn "Stage already associated"
+    --region "$REGION" 2>&1 || log_warn "Stage already associated"
 
 API_ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com/dev"
 log_success "API deployed at: $API_ENDPOINT"

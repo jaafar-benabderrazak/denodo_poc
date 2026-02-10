@@ -48,7 +48,7 @@ assert_gt() {
     local threshold=$2
     local actual=$3
 
-    if [ "$actual" -gt "$threshold" ] 2>/dev/null; then
+    if [ "$actual" -gt "$threshold" ] 2>&1; then
         echo -e "  ${GREEN}✓ PASS${NC} $test_name (got: $actual)"
         PASS=$((PASS + 1))
     else
@@ -81,18 +81,18 @@ echo "▶ Public API Connectivity"
 
 # Test geo.api.gouv.fr
 GEO_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    "https://geo.api.gouv.fr/communes?codePostal=75001&fields=nom,code,population" 2>/dev/null || echo "000")
+    "https://geo.api.gouv.fr/communes?codePostal=75001&fields=nom,code,population" 2>&1 || echo "000")
 assert "geo.api.gouv.fr is reachable" "200" "$GEO_STATUS"
 
 if [ "$GEO_STATUS" == "200" ]; then
-    GEO_RESPONSE=$(curl -s "https://geo.api.gouv.fr/communes?codePostal=75001&fields=nom,code,population" 2>/dev/null)
+    GEO_RESPONSE=$(curl -s "https://geo.api.gouv.fr/communes?codePostal=75001&fields=nom,code,population" 2>&1)
     GEO_COUNT=$(echo "$GEO_RESPONSE" | jq 'length')
     assert_gt "geo API returns communes for 75001" "0" "$GEO_COUNT"
 fi
 
 # Test api.insee.fr/entreprises endpoint (SIRENE)
 SIRENE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    "https://api.insee.fr/entreprises/sirene/V3.11" 2>/dev/null || echo "000")
+    "https://api.insee.fr/entreprises/sirene/V3.11" 2>&1 || echo "000")
 TOTAL=$((TOTAL + 1))
 if [ "$SIRENE_STATUS" != "000" ]; then
     echo -e "  ${GREEN}✓ PASS${NC} api.insee.fr is reachable (HTTP $SIRENE_STATUS)"
@@ -114,7 +114,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
     DB_PASSWORD=$(aws secretsmanager get-secret-value \
         --secret-id "${PROJECT_NAME}/opendata/db" \
         --region "$REGION" \
-        --query SecretString --output text | jq -r '.password' 2>/dev/null)
+        --query SecretString --output text | jq -r '.password' 2>&1)
 
     # Test via SSM (using Denodo EC2 as bastion)
     log_info_msg="Testing RDS via SSM on instance $DENODO_INSTANCE_ID..."
@@ -126,7 +126,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
         --document-name AWS-RunShellScript \
         --parameters "commands=[\"PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_ENDPOINT}' -U denodo -d opendata -t -c 'SELECT count(*) FROM opendata.entreprises;'\"]" \
         --region "$REGION" \
-        --query 'Command.CommandId' --output text 2>/dev/null)
+        --query 'Command.CommandId' --output text 2>&1)
 
     if [ ! -z "$ENTREPRISES_COUNT" ] && [ "$ENTREPRISES_COUNT" != "None" ]; then
         sleep 5
@@ -134,7 +134,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
             --command-id "$ENTREPRISES_COUNT" \
             --instance-id "$DENODO_INSTANCE_ID" \
             --region "$REGION" \
-            --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')
+            --query 'StandardOutputContent' --output text 2>&1 | tr -d '[:space:]')
 
         assert_gt "entreprises table has rows" "0" "${RESULT:-0}"
     else
@@ -148,7 +148,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
         --document-name AWS-RunShellScript \
         --parameters "commands=[\"PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_ENDPOINT}' -U denodo -d opendata -t -c 'SELECT count(*) FROM opendata.population_communes;'\"]" \
         --region "$REGION" \
-        --query 'Command.CommandId' --output text 2>/dev/null)
+        --query 'Command.CommandId' --output text 2>&1)
 
     if [ ! -z "$POP_COUNT" ] && [ "$POP_COUNT" != "None" ]; then
         sleep 5
@@ -156,7 +156,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
             --command-id "$POP_COUNT" \
             --instance-id "$DENODO_INSTANCE_ID" \
             --region "$REGION" \
-            --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')
+            --query 'StandardOutputContent' --output text 2>&1 | tr -d '[:space:]')
 
         assert_gt "population_communes table has rows" "0" "${RESULT:-0}"
     fi
@@ -167,7 +167,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
         --document-name AWS-RunShellScript \
         --parameters "commands=[\"PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_ENDPOINT}' -U denodo -d opendata -t -c 'SELECT count(*) FROM opendata.entreprises_population;'\"]" \
         --region "$REGION" \
-        --query 'Command.CommandId' --output text 2>/dev/null)
+        --query 'Command.CommandId' --output text 2>&1)
 
     if [ ! -z "$VIEW_TEST" ] && [ "$VIEW_TEST" != "None" ]; then
         sleep 5
@@ -175,7 +175,7 @@ if [ ! -z "$OPENDATA_ENDPOINT" ] && [ "$OPENDATA_ENDPOINT" != "null" ]; then
             --command-id "$VIEW_TEST" \
             --instance-id "$DENODO_INSTANCE_ID" \
             --region "$REGION" \
-            --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')
+            --query 'StandardOutputContent' --output text 2>&1 | tr -d '[:space:]')
 
         assert_gt "entreprises_population view returns rows" "0" "${RESULT:-0}"
     fi
@@ -193,7 +193,7 @@ echo "▶ Denodo EC2 Instance"
 INSTANCE_STATE=$(aws ec2 describe-instances \
     --instance-ids "$DENODO_INSTANCE_ID" \
     --region "$REGION" \
-    --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)
+    --query 'Reservations[0].Instances[0].State.Name' --output text 2>&1)
 
 assert "Denodo EC2 instance is running" "running" "$INSTANCE_STATE"
 
@@ -201,7 +201,7 @@ assert "Denodo EC2 instance is running" "running" "$INSTANCE_STATE"
 SSM_STATUS=$(aws ssm describe-instance-information \
     --filters "Key=InstanceIds,Values=${DENODO_INSTANCE_ID}" \
     --region "$REGION" \
-    --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)
+    --query 'InstanceInformationList[0].PingStatus' --output text 2>&1)
 
 assert "Denodo EC2 SSM agent is online" "Online" "$SSM_STATUS"
 

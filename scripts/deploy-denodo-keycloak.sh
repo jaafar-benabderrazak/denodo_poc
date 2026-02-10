@@ -73,7 +73,7 @@ AWS_CLI_VERSION=$(aws --version 2>&1 | cut -d' ' -f1 | cut -d'/' -f2)
 log_info "AWS CLI version: $AWS_CLI_VERSION"
 
 step "Validating AWS credentials"
-CALLER_IDENTITY=$(aws sts get-caller-identity --region $REGION 2>/dev/null)
+CALLER_IDENTITY=$(aws sts get-caller-identity --region $REGION 2>&1)
 if [ $? -ne 0 ]; then
     log_error "AWS credentials are not configured properly"
     exit 1
@@ -103,7 +103,7 @@ done
 log_info "All required tools are installed"
 
 step "Validating VPC exists"
-VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --region $REGION --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "")
+VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --region $REGION --query 'Vpcs[0].VpcId' --output text 2>&1 || echo "")
 if [ -z "$VPC_EXISTS" ] || [ "$VPC_EXISTS" == "None" ]; then
     log_error "VPC $VPC_ID does not exist in region $REGION"
     exit 1
@@ -166,7 +166,7 @@ ALB_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak ALB" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-alb-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -179,12 +179,12 @@ log_info "ALB Security Group: $ALB_SG_ID"
 aws ec2 authorize-security-group-ingress \
     --group-id $ALB_SG_ID \
     --protocol tcp --port 80 --cidr 0.0.0.0/0 \
-    --region $REGION 2>/dev/null || log_warn "Port 80 rule already exists"
+    --region $REGION 2>&1 || log_warn "Port 80 rule already exists"
 
 aws ec2 authorize-security-group-ingress \
     --group-id $ALB_SG_ID \
     --protocol tcp --port 443 --cidr 0.0.0.0/0 \
-    --region $REGION 2>/dev/null || log_warn "Port 443 rule already exists"
+    --region $REGION 2>&1 || log_warn "Port 443 rule already exists"
 
 step "Creating Keycloak ECS Security Group"
 ECS_SG_ID=$(aws ec2 create-security-group \
@@ -192,7 +192,7 @@ ECS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak ECS tasks" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-ecs-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -205,7 +205,7 @@ log_info "ECS Security Group: $ECS_SG_ID"
 aws ec2 authorize-security-group-ingress \
     --group-id $ECS_SG_ID \
     --protocol tcp --port 8080 --source-group $ALB_SG_ID \
-    --region $REGION 2>/dev/null || log_warn "Port 8080 from ALB rule already exists"
+    --region $REGION 2>&1 || log_warn "Port 8080 from ALB rule already exists"
 
 step "Creating RDS Security Group"
 RDS_SG_ID=$(aws ec2 create-security-group \
@@ -213,7 +213,7 @@ RDS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak RDS databases" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -226,7 +226,7 @@ log_info "RDS Security Group: $RDS_SG_ID"
 aws ec2 authorize-security-group-ingress \
     --group-id $RDS_SG_ID \
     --protocol tcp --port 5432 --source-group $ECS_SG_ID \
-    --region $REGION 2>/dev/null || log_warn "Port 5432 from ECS rule already exists"
+    --region $REGION 2>&1 || log_warn "Port 5432 from ECS rule already exists"
 
 step "Creating OpenData RDS Security Group"
 OPENDATA_RDS_SG_ID=$(aws ec2 create-security-group \
@@ -234,7 +234,7 @@ OPENDATA_RDS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for OpenData RDS database" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-opendata-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -248,13 +248,13 @@ DENODO_EC2_IP="10.0.75.195"
 aws ec2 authorize-security-group-ingress \
     --group-id $OPENDATA_RDS_SG_ID \
     --protocol tcp --port 5432 --cidr "${DENODO_EC2_IP}/32" \
-    --region $REGION 2>/dev/null || log_warn "Denodo access rule already exists"
+    --region $REGION 2>&1 || log_warn "Denodo access rule already exists"
 
 # Allow ECS tasks to access OpenData RDS (for data loading)
 aws ec2 authorize-security-group-ingress \
     --group-id $OPENDATA_RDS_SG_ID \
     --protocol tcp --port 5432 --source-group $ECS_SG_ID \
-    --region $REGION 2>/dev/null || log_warn "ECS access to OpenData RDS already exists"
+    --region $REGION 2>&1 || log_warn "ECS access to OpenData RDS already exists"
 
 step "Updating Denodo EC2 security group"
 # Find Denodo EC2 instance
@@ -263,7 +263,7 @@ DENODO_SG=$(aws ec2 describe-instances \
     --instance-ids $DENODO_INSTANCE_ID \
     --region $REGION \
     --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' \
-    --output text 2>/dev/null || echo "")
+    --output text 2>&1 || echo "")
 
 if [ ! -z "$DENODO_SG" ] && [ "$DENODO_SG" != "None" ]; then
     log_info "Denodo Security Group: $DENODO_SG"
@@ -271,7 +271,7 @@ if [ ! -z "$DENODO_SG" ] && [ "$DENODO_SG" != "None" ]; then
     aws ec2 authorize-security-group-ingress \
         --group-id $ECS_SG_ID \
         --protocol tcp --port 8080 --source-group $DENODO_SG \
-        --region $REGION 2>/dev/null || log_warn "Denodo to Keycloak rule already exists"
+        --region $REGION 2>&1 || log_warn "Denodo to Keycloak rule already exists"
 fi
 
 ###############################################################################
@@ -293,7 +293,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/provider/db" \
     --description "Keycloak Provider database credentials" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/provider/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\"}" \
@@ -306,7 +306,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/consumer/db" \
     --description "Keycloak Consumer database credentials" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_CONSUMER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_consumer\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/consumer/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_CONSUMER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_consumer\"}" \
@@ -319,7 +319,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/opendata/db" \
     --description "OpenData database credentials" \
     --secret-string "{\"username\":\"denodo\",\"password\":\"$OPENDATA_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"opendata\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/opendata/db" \
     --secret-string "{\"username\":\"denodo\",\"password\":\"$OPENDATA_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"opendata\"}" \
@@ -332,7 +332,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/admin" \
     --description "Keycloak admin credentials" \
     --secret-string "{\"username\":\"admin\",\"password\":\"$KEYCLOAK_ADMIN_PASSWORD\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/admin" \
     --secret-string "{\"username\":\"admin\",\"password\":\"$KEYCLOAK_ADMIN_PASSWORD\"}" \
@@ -345,7 +345,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/client-secret" \
     --description "OIDC client secret for federation" \
     --secret-string "{\"clientId\":\"denodo-consumer\",\"clientSecret\":\"$CLIENT_SECRET\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/client-secret" \
     --secret-string "{\"clientId\":\"denodo-consumer\",\"clientSecret\":\"$CLIENT_SECRET\"}" \
@@ -358,7 +358,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/api/auth-key" \
     --description "API Gateway authorization key" \
     --secret-string "{\"apiKey\":\"$API_KEY\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/api/auth-key" \
     --secret-string "{\"apiKey\":\"$API_KEY\"}" \
@@ -378,7 +378,7 @@ aws rds create-db-subnet-group \
     --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
     --db-subnet-group-description "Subnet group for Denodo POC databases" \
     --subnet-ids $PRIVATE_SUBNET_1 $PRIVATE_SUBNET_2 \
-    --region $REGION 2>/dev/null || log_warn "DB subnet group already exists"
+    --region $REGION 2>&1 || log_warn "DB subnet group already exists"
 
 log_info "DB Subnet Group: $DB_SUBNET_GROUP_NAME"
 
@@ -398,7 +398,7 @@ aws rds create-db-instance \
     --backup-retention-period 7 \
     --no-publicly-accessible \
     --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-provider" \
-    --region $REGION 2>/dev/null || log_warn "Keycloak Provider DB already exists"
+    --region $REGION 2>&1 || log_warn "Keycloak Provider DB already exists"
 
 log_info "Creating RDS instance: $PROVIDER_DB_ID (this may take 5-10 minutes)"
 
@@ -418,7 +418,7 @@ aws rds create-db-instance \
     --backup-retention-period 7 \
     --no-publicly-accessible \
     --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-consumer" \
-    --region $REGION 2>/dev/null || log_warn "Keycloak Consumer DB already exists"
+    --region $REGION 2>&1 || log_warn "Keycloak Consumer DB already exists"
 
 log_info "Creating RDS instance: $CONSUMER_DB_ID (this may take 5-10 minutes)"
 
@@ -438,7 +438,7 @@ aws rds create-db-instance \
     --backup-retention-period 7 \
     --no-publicly-accessible \
     --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=opendata" \
-    --region $REGION 2>/dev/null || log_warn "OpenData DB already exists"
+    --region $REGION 2>&1 || log_warn "OpenData DB already exists"
 
 log_info "Creating RDS instance: $OPENDATA_DB_ID (this may take 5-10 minutes)"
 
