@@ -496,39 +496,55 @@ aws secretsmanager update-secret \
 # Save deployment info for next steps
 ###############################################################################
 
-cat > deployment-info.json <<EOF
-{
-  "region": "$REGION",
-  "vpcId": "$VPC_ID",
-  "accountId": "$ACCOUNT_ID",
-  "projectName": "$PROJECT_NAME",
-  "ecsClusterName": "$ECS_CLUSTER_NAME",
-  "securityGroups": {
-    "alb": "$ALB_SG_ID",
-    "ecs": "$ECS_SG_ID",
-    "rds": "$RDS_SG_ID",
-    "opendataRds": "$OPENDATA_RDS_SG_ID"
-  },
-  "subnets": {
-    "private": ["$PRIVATE_SUBNET_1", "$PRIVATE_SUBNET_2"],
-    "public": ["$PUBLIC_SUBNET_1", "$PUBLIC_SUBNET_2"]
-  },
-  "rdsEndpoints": {
-    "provider": "$PROVIDER_DB_ENDPOINT",
-    "consumer": "$CONSUMER_DB_ENDPOINT",
-    "opendata": "$OPENDATA_DB_ENDPOINT"
-  },
-  "secrets": {
-    "providerDb": "${PROJECT_NAME}/keycloak/provider/db",
-    "consumerDb": "${PROJECT_NAME}/keycloak/consumer/db",
-    "opendataDb": "${PROJECT_NAME}/opendata/db",
-    "keycloakAdmin": "${PROJECT_NAME}/keycloak/admin",
-    "clientSecret": "${PROJECT_NAME}/keycloak/client-secret",
-    "apiKey": "${PROJECT_NAME}/api/auth-key"
-  },
-  "deploymentTimestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
+jq -n \
+  --arg region "$REGION" \
+  --arg vpcId "$VPC_ID" \
+  --arg accountId "$ACCOUNT_ID" \
+  --arg projectName "$PROJECT_NAME" \
+  --arg ecsClusterName "$ECS_CLUSTER_NAME" \
+  --arg albSg "$ALB_SG_ID" \
+  --arg ecsSg "$ECS_SG_ID" \
+  --arg rdsSg "$RDS_SG_ID" \
+  --arg opendataRdsSg "$OPENDATA_RDS_SG_ID" \
+  --arg privSub1 "$PRIVATE_SUBNET_1" \
+  --arg privSub2 "$PRIVATE_SUBNET_2" \
+  --arg pubSub1 "$PUBLIC_SUBNET_1" \
+  --arg pubSub2 "$PUBLIC_SUBNET_2" \
+  --arg provDb "$PROVIDER_DB_ENDPOINT" \
+  --arg consDb "$CONSUMER_DB_ENDPOINT" \
+  --arg openDb "$OPENDATA_DB_ENDPOINT" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{
+    region: $region,
+    vpcId: $vpcId,
+    accountId: $accountId,
+    projectName: $projectName,
+    ecsClusterName: $ecsClusterName,
+    securityGroups: {
+      alb: $albSg,
+      ecs: $ecsSg,
+      rds: $rdsSg,
+      opendataRds: $opendataRdsSg
+    },
+    subnets: {
+      private: [$privSub1, $privSub2],
+      public: [$pubSub1, $pubSub2]
+    },
+    rdsEndpoints: {
+      provider: $provDb,
+      consumer: $consDb,
+      opendata: $openDb
+    },
+    secrets: {
+      providerDb: ($projectName + "/keycloak/provider/db"),
+      consumerDb: ($projectName + "/keycloak/consumer/db"),
+      opendataDb: ($projectName + "/opendata/db"),
+      keycloakAdmin: ($projectName + "/keycloak/admin"),
+      clientSecret: ($projectName + "/keycloak/client-secret"),
+      apiKey: ($projectName + "/api/auth-key")
+    },
+    deploymentTimestamp: $ts
+  }' > deployment-info.json
 
 log_section "PHASE 3 COMPLETE - Infrastructure Created"
 log_info "Deployment info saved to deployment-info.json"
