@@ -12,6 +12,7 @@
 ###############################################################################
 
 set -e
+trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO. Command: $BASH_COMMAND\033[0m"' ERR
 
 # Configuration
 REGION="eu-west-3"
