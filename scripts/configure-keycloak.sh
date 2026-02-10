@@ -108,7 +108,7 @@ kc_api() {
 
 log_step "0.1" "Testing Keycloak accessibility"
 
-HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/ready" 2>&1 || echo "000")
+HEALTH_CHECK=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/auth/health/ready" 2>/dev/null || echo "000")
 
 if [ "$HEALTH_CHECK" != "200" ]; then
     log_error "Keycloak is not accessible at ${KC_BASE_URL} (HTTP $HEALTH_CHECK)"

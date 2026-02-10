@@ -281,7 +281,7 @@ cat > /tmp/keycloak-provider-task.json <<EOF
       ],
       "command": ["start"],
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"],
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/auth/health/ready || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -355,7 +355,7 @@ cat > /tmp/keycloak-consumer-task.json <<EOF
       ],
       "command": ["start"],
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"],
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/auth/health/ready || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -432,7 +432,7 @@ PROVIDER_TG_ARN=$(aws elbv2 create-target-group \
     --vpc-id "$VPC_ID" \
     --target-type ip \
     --health-check-enabled \
-    --health-check-path "/health/ready" \
+    --health-check-path "/auth/health/ready" \
     --health-check-interval-seconds 30 \
     --health-check-timeout-seconds 10 \
     --healthy-threshold-count 2 \
@@ -446,6 +446,9 @@ PROVIDER_TG_ARN=$(aws elbv2 create-target-group \
         --region "$REGION" \
         --query 'TargetGroups[0].TargetGroupArn' --output text)
 
+# Force update health check path for existing Target Groups
+aws elbv2 modify-target-group --target-group-arn "$PROVIDER_TG_ARN" --health-check-path "/auth/health/ready" >/dev/null 2>&1
+
 log_success "Provider TG: $PROVIDER_TG_ARN"
 
 # Consumer target group
@@ -456,7 +459,7 @@ CONSUMER_TG_ARN=$(aws elbv2 create-target-group \
     --vpc-id "$VPC_ID" \
     --target-type ip \
     --health-check-enabled \
-    --health-check-path "/health/ready" \
+    --health-check-path "/auth/health/ready" \
     --health-check-interval-seconds 30 \
     --health-check-timeout-seconds 10 \
     --healthy-threshold-count 2 \
@@ -469,6 +472,9 @@ CONSUMER_TG_ARN=$(aws elbv2 create-target-group \
         --names keycloak-consumer-tg \
         --region "$REGION" \
         --query 'TargetGroups[0].TargetGroupArn' --output text)
+
+# Force update health check path for existing Target Groups
+aws elbv2 modify-target-group --target-group-arn "$CONSUMER_TG_ARN" --health-check-path "/auth/health/ready" >/dev/null 2>&1
 
 log_success "Consumer TG: $CONSUMER_TG_ARN"
 
@@ -517,7 +523,7 @@ aws elbv2 create-rule \
 aws elbv2 create-rule \
     --listener-arn "$LISTENER_ARN" \
     --priority 30 \
-    --conditions Field=path-pattern,Values='/health/*' \
+    --conditions Field=path-pattern,Values='/auth/health/*' \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
     --region "$REGION" 2>&1 || log_warn "Health path rule already exists"
 
@@ -624,7 +630,7 @@ UPDATED_INFO=$(jq \
             "providerAdmin": ("http://" + $alb_dns + "/auth/admin"),
             "providerRealm": ("http://" + $alb_dns + "/auth/realms/denodo-idp"),
             "consumerRealm": ("http://" + $alb_dns + "/auth/realms/denodo-consumer"),
-            "health": ("http://" + $alb_dns + "/health/ready")
+            "health": ("http://" + $alb_dns + "/auth/health/ready")
         }
     }' "$DEPLOYMENT_INFO")
 
