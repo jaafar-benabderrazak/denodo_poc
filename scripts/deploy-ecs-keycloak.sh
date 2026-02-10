@@ -503,6 +503,14 @@ aws elbv2 create-rule \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
     --region "$REGION" 2>&1 || log_warn "Provider path rule already exists"
 
+# Rule 1.5: Route /auth/realms/master/* to Provider (admin login)
+aws elbv2 create-rule \
+    --listener-arn "$LISTENER_ARN" \
+    --priority 12 \
+    --conditions Field=path-pattern,Values='/auth/realms/master/*' \
+    --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
+    --region "$REGION" 2>&1 || log_warn "Master realm rule already exists"
+
 # Rule 2: Route /auth/realms/master/* to Provider (admin console)
 aws elbv2 create-rule \
     --listener-arn "$LISTENER_ARN" \
