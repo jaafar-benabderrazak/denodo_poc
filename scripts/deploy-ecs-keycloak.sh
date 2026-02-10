@@ -131,7 +131,7 @@ EOF
 SECRETS_POLICY_ARN=$(aws iam create-policy \
     --policy-name "${PROJECT_NAME}-secrets-access" \
     --policy-document file:///tmp/secrets-policy.json \
-    --query 'Policy.Arn' --output text 2>&1 || \
+    --query 'Policy.Arn' --output text 2>/dev/null || \
     echo "arn:aws:iam::${ACCOUNT_ID}:policy/${PROJECT_NAME}-secrets-access")
 
 aws iam attach-role-policy \
@@ -438,7 +438,7 @@ PROVIDER_TG_ARN=$(aws elbv2 create-target-group \
     --matcher HttpCode=200 \
     --tags Key=Project,Value="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'TargetGroups[0].TargetGroupArn' --output text 2>&1 || \
+    --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || \
     aws elbv2 describe-target-groups \
         --names keycloak-provider-tg \
         --region "$REGION" \
@@ -462,7 +462,7 @@ CONSUMER_TG_ARN=$(aws elbv2 create-target-group \
     --matcher HttpCode=200 \
     --tags Key=Project,Value="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'TargetGroups[0].TargetGroupArn' --output text 2>&1 || \
+    --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || \
     aws elbv2 describe-target-groups \
         --names keycloak-consumer-tg \
         --region "$REGION" \
@@ -479,7 +479,7 @@ LISTENER_ARN=$(aws elbv2 create-listener \
     --port 80 \
     --default-actions Type=fixed-response,FixedResponseConfig="{StatusCode=404,ContentType=text/plain,MessageBody=Not Found}" \
     --region "$REGION" \
-    --query 'Listeners[0].ListenerArn' --output text 2>&1 || \
+    --query 'Listeners[0].ListenerArn' --output text 2>/dev/null || \
     aws elbv2 describe-listeners \
         --load-balancer-arn "$ALB_ARN" \
         --region "$REGION" \

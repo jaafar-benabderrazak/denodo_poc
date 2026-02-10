@@ -114,7 +114,7 @@ EOF
 LAMBDA_SECRETS_POLICY_ARN=$(aws iam create-policy \
     --policy-name "${PROJECT_NAME}-lambda-secrets-access" \
     --policy-document file:///tmp/lambda-secrets-policy.json \
-    --query 'Policy.Arn' --output text 2>&1 || \
+    --query 'Policy.Arn' --output text 2>/dev/null || \
     echo "arn:aws:iam::${ACCOUNT_ID}:policy/${PROJECT_NAME}-lambda-secrets-access")
 
 aws iam attach-role-policy \
@@ -220,7 +220,7 @@ API_ID=$(aws apigateway create-rest-api \
     --endpoint-configuration types=REGIONAL \
     --tags Project="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-rest-apis \
         --region "$REGION" \
         --query "items[?name=='${API_NAME}'].id" --output text)
@@ -241,7 +241,7 @@ API_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$ROOT_RESOURCE_ID" \
     --path-part "api" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -253,7 +253,7 @@ V1_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$API_RESOURCE_ID" \
     --path-part "v1" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -265,7 +265,7 @@ USERS_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$V1_RESOURCE_ID" \
     --path-part "users" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -277,7 +277,7 @@ USERID_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$USERS_RESOURCE_ID" \
     --path-part "{userId}" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -289,7 +289,7 @@ PERMISSIONS_RESOURCE_ID=$(aws apigateway create-resource \
     --parent-id "$USERID_RESOURCE_ID" \
     --path-part "permissions" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-resources \
         --rest-api-id "$API_ID" \
         --region "$REGION" \
@@ -383,7 +383,7 @@ API_KEY_ID=$(aws apigateway create-api-key \
     --value "$API_KEY_VALUE" \
     --tags Project="$PROJECT_NAME" \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-api-keys \
         --name-query "${PROJECT_NAME}-api-key" \
         --region "$REGION" \
@@ -398,7 +398,7 @@ USAGE_PLAN_ID=$(aws apigateway create-usage-plan \
     --throttle burstLimit=100,rateLimit=50 \
     --quota limit=10000,period=MONTH \
     --region "$REGION" \
-    --query 'id' --output text 2>&1 || \
+    --query 'id' --output text 2>/dev/null || \
     aws apigateway get-usage-plans \
         --region "$REGION" \
         --query "items[?name=='${PROJECT_NAME}-usage-plan'].id" --output text)

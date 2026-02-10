@@ -166,7 +166,7 @@ ALB_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak ALB" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>&1 || \
+    --output text --query 'GroupId' 2>/dev/null || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-alb-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -179,12 +179,12 @@ log_info "ALB Security Group: $ALB_SG_ID"
 aws ec2 authorize-security-group-ingress \
     --group-id $ALB_SG_ID \
     --protocol tcp --port 80 --cidr 0.0.0.0/0 \
-    --region $REGION 2>&1 || log_warn "Port 80 rule already exists"
+    --region $REGION 2>/dev/null || log_warn "Port 80 rule already exists"
 
 aws ec2 authorize-security-group-ingress \
     --group-id $ALB_SG_ID \
     --protocol tcp --port 443 --cidr 0.0.0.0/0 \
-    --region $REGION 2>&1 || log_warn "Port 443 rule already exists"
+    --region $REGION 2>/dev/null || log_warn "Port 443 rule already exists"
 
 step "Creating Keycloak ECS Security Group"
 ECS_SG_ID=$(aws ec2 create-security-group \
@@ -192,7 +192,7 @@ ECS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak ECS tasks" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>&1 || \
+    --output text --query 'GroupId' 2>/dev/null || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-ecs-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -205,7 +205,7 @@ log_info "ECS Security Group: $ECS_SG_ID"
 aws ec2 authorize-security-group-ingress \
     --group-id $ECS_SG_ID \
     --protocol tcp --port 8080 --source-group $ALB_SG_ID \
-    --region $REGION 2>&1 || log_warn "Port 8080 from ALB rule already exists"
+    --region $REGION 2>/dev/null || log_warn "Port 8080 from ALB rule already exists"
 
 step "Creating RDS Security Group"
 RDS_SG_ID=$(aws ec2 create-security-group \
@@ -213,7 +213,7 @@ RDS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak RDS databases" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>&1 || \
+    --output text --query 'GroupId' 2>/dev/null || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -226,7 +226,7 @@ log_info "RDS Security Group: $RDS_SG_ID"
 aws ec2 authorize-security-group-ingress \
     --group-id $RDS_SG_ID \
     --protocol tcp --port 5432 --source-group $ECS_SG_ID \
-    --region $REGION 2>&1 || log_warn "Port 5432 from ECS rule already exists"
+    --region $REGION 2>/dev/null || log_warn "Port 5432 from ECS rule already exists"
 
 step "Creating OpenData RDS Security Group"
 OPENDATA_RDS_SG_ID=$(aws ec2 create-security-group \
@@ -234,7 +234,7 @@ OPENDATA_RDS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for OpenData RDS database" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>&1 || \
+    --output text --query 'GroupId' 2>/dev/null || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-opendata-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -248,13 +248,13 @@ DENODO_EC2_IP="10.0.75.195"
 aws ec2 authorize-security-group-ingress \
     --group-id $OPENDATA_RDS_SG_ID \
     --protocol tcp --port 5432 --cidr "${DENODO_EC2_IP}/32" \
-    --region $REGION 2>&1 || log_warn "Denodo access rule already exists"
+    --region $REGION 2>/dev/null || log_warn "Denodo access rule already exists"
 
 # Allow ECS tasks to access OpenData RDS (for data loading)
 aws ec2 authorize-security-group-ingress \
     --group-id $OPENDATA_RDS_SG_ID \
     --protocol tcp --port 5432 --source-group $ECS_SG_ID \
-    --region $REGION 2>&1 || log_warn "ECS access to OpenData RDS already exists"
+    --region $REGION 2>/dev/null || log_warn "ECS access to OpenData RDS already exists"
 
 step "Updating Denodo EC2 security group"
 # Find Denodo EC2 instance
@@ -263,7 +263,7 @@ DENODO_SG=$(aws ec2 describe-instances \
     --instance-ids $DENODO_INSTANCE_ID \
     --region $REGION \
     --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' \
-    --output text 2>&1 || echo "")
+    --output text 2>/dev/null || echo "")
 
 if [ ! -z "$DENODO_SG" ] && [ "$DENODO_SG" != "None" ]; then
     log_info "Denodo Security Group: $DENODO_SG"
