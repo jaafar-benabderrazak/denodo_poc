@@ -111,33 +111,37 @@ fi
 log_info "VPC $VPC_ID validated"
 
 step "Discovering subnets"
-# Get private subnets (MapPublicIpOnLaunch=false)
+# Get private subnets (not public by name and MapPublicIpOnLaunch=false)
 PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
     --filters "Name=vpc-id,Values=$VPC_ID" \
     --region $REGION \
     --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId' \
     --output json)
 
-# Get public subnets (MapPublicIpOnLaunch=true)
-PUBLIC_SUBNETS=$(aws ec2 describe-subnets \
+# Get public subnets: by MapPublicIpOnLaunch=true OR Name tag containing 'public'
+# This catches subnets like "ADS VPC-subnet-public*" that have IGW routes but MapPublicIpOnLaunch=false
+ALL_SUBNETS_JSON=$(aws ec2 describe-subnets \
     --filters "Name=vpc-id,Values=$VPC_ID" \
     --region $REGION \
-    --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
+    --query 'Subnets[].{Id:SubnetId,AZ:AvailabilityZone,Public:MapPublicIpOnLaunch,Name:Tags[?Key==`Name`].Value|[0]}' \
     --output json)
+
+PUBLIC_SUBNETS=$(echo "$ALL_SUBNETS_JSON" | jq '[.[] | select(.Public == true or (.Name // "" | test("public";"i")))] | unique_by(.AZ) | [.[].Id]')
 
 PRIVATE_SUBNET_COUNT=$(echo $PRIVATE_SUBNETS | jq '. | length')
 PUBLIC_SUBNET_COUNT=$(echo $PUBLIC_SUBNETS | jq '. | length')
 
 log_info "Found $PRIVATE_SUBNET_COUNT private subnets"
-log_info "Found $PUBLIC_SUBNET_COUNT public subnets"
+log_info "Found $PUBLIC_SUBNET_COUNT public subnets (by flag or name)"
 
 if [ $PRIVATE_SUBNET_COUNT -lt 2 ]; then
     log_error "ECS Fargate requires at least 2 private subnets in different AZs"
     exit 1
 fi
 
-if [ $PUBLIC_SUBNET_COUNT -lt 1 ]; then
-    log_error "ALB requires at least 1 public subnet"
+if [ $PUBLIC_SUBNET_COUNT -lt 2 ]; then
+    log_error "ALB requires at least 2 public subnets in different AZs"
+    log_error "Found subnets: $(echo $PUBLIC_SUBNETS | jq -r 'join(", ")')"
     exit 1
 fi
 
@@ -145,14 +149,7 @@ fi
 PRIVATE_SUBNET_1=$(echo $PRIVATE_SUBNETS | jq -r '.[0]')
 PRIVATE_SUBNET_2=$(echo $PRIVATE_SUBNETS | jq -r '.[1]')
 PUBLIC_SUBNET_1=$(echo $PUBLIC_SUBNETS | jq -r '.[0]')
-
-# If only 1 public subnet, use it twice (ALB can work in single AZ for POC)
-if [ $PUBLIC_SUBNET_COUNT -eq 1 ]; then
-    log_warn "Only 1 public subnet found. Using same subnet for ALB (single AZ deployment)"
-    PUBLIC_SUBNET_2=$PUBLIC_SUBNET_1
-else
-    PUBLIC_SUBNET_2=$(echo $PUBLIC_SUBNETS | jq -r '.[1]')
-fi
+PUBLIC_SUBNET_2=$(echo $PUBLIC_SUBNETS | jq -r '.[1]')
 
 log_info "Using private subnets: $PRIVATE_SUBNET_1, $PRIVATE_SUBNET_2"
 log_info "Using public subnets: $PUBLIC_SUBNET_1, $PUBLIC_SUBNET_2"
