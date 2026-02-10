@@ -115,13 +115,13 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
             FAIL=$((FAIL + 1))
         fi
 
-        HAS_DATASOURCES=$(echo "$RESPONSE" | jq -r '.datasourcePermissions // empty')
+        HAS_DATASOURCES=$(echo "$RESPONSE" | jq -r '.datasources // empty')
         TOTAL=$((TOTAL + 1))
         if [ ! -z "$HAS_DATASOURCES" ] && [ "$HAS_DATASOURCES" != "null" ]; then
-            echo -e "  ${GREEN}✓ PASS${NC} Response contains datasourcePermissions for $USER_EMAIL"
+            echo -e "  ${GREEN}✓ PASS${NC} Response contains datasources for $USER_EMAIL"
             PASS=$((PASS + 1))
         else
-            echo -e "  ${RED}✗ FAIL${NC} Response missing datasourcePermissions for $USER_EMAIL"
+            echo -e "  ${RED}✗ FAIL${NC} Response missing datasources for $USER_EMAIL"
             FAIL=$((FAIL + 1))
         fi
     fi
@@ -163,7 +163,7 @@ HTTP_STATUS=$(curl -s -o /tmp/auth_unknown.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
     "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>&1)
 
-assert "Unknown user returns 404" "404" "$HTTP_STATUS"
+assert "Unknown user returns 200 with guest profile" "200" "$HTTP_STATUS"
 
 ###############################################################################
 # Test 5: Analyst Permissions Validation

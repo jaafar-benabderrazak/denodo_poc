@@ -521,12 +521,12 @@ aws elbv2 create-rule \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
     --region "$REGION" 2>&1 || log_warn "Admin path rule already exists"
 
-# Rule 3: Route /auth/realms/denodo-consumer/* to Consumer
+# Rule 3: Route /auth/realms/denodo-consumer/* to Provider (both realms on same instance)
 aws elbv2 create-rule \
     --listener-arn "$LISTENER_ARN" \
     --priority 20 \
     --conditions Field=path-pattern,Values='/auth/realms/denodo-consumer/*' \
-    --actions Type=forward,TargetGroupArn="$CONSUMER_TG_ARN" \
+    --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
     --region "$REGION" 2>&1 || log_warn "Consumer path rule already exists"
 
 # Rule 4: Route /health/* to Provider (general health)

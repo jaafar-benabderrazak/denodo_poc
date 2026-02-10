@@ -85,10 +85,10 @@ ADMIN_PASSWORD=$(aws secretsmanager get-secret-value \
 echo ""
 echo "▶ Health Endpoints"
 
-HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/ready" 2>&1 || echo "000")
+HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/auth/health/ready" 2>/dev/null || echo "000")
 assert "Keycloak health/ready returns 200" "200" "$HEALTH_STATUS"
 
-HEALTH_LIVE=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/health/live" 2>&1 || echo "000")
+HEALTH_LIVE=$(curl -s -o /dev/null -w "%{http_code}" "${KC_BASE_URL}/auth/health/live" 2>/dev/null || echo "000")
 assert "Keycloak health/live returns 200" "200" "$HEALTH_LIVE"
 
 ###############################################################################
