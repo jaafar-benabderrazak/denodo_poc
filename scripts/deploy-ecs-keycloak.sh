@@ -391,13 +391,14 @@ log_info "Public subnet 1: $PUBLIC_SUBNET_1"
 log_info "Public subnet 2: $PUBLIC_SUBNET_2"
 log_info "ALB SG: $ALB_SG_ID"
 
-# Check if ALB already exists
-ALB_ARN=$(aws elbv2 describe-load-balancers \
-    --names keycloak-alb \
-    --region "$REGION" \
-    --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>&1 || echo "")
-
-if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" == "None" ]; then
+# Check if ALB already exists (stderr suppressed here intentionally - we check exit code)
+if aws elbv2 describe-load-balancers --names keycloak-alb --region "$REGION" > /dev/null 2>&1; then
+    ALB_ARN=$(aws elbv2 describe-load-balancers \
+        --names keycloak-alb \
+        --region "$REGION" \
+        --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+    log_warn "ALB keycloak-alb already exists"
+else
     log_info "Creating new ALB..."
     ALB_ARN=$(aws elbv2 create-load-balancer \
         --name keycloak-alb \
@@ -409,8 +410,6 @@ if [ -z "$ALB_ARN" ] || [ "$ALB_ARN" == "None" ]; then
         --tags Key=Project,Value="$PROJECT_NAME" Key=Environment,Value=dev \
         --region "$REGION" \
         --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-else
-    log_warn "ALB keycloak-alb already exists"
 fi
 
 ALB_DNS=$(aws elbv2 describe-load-balancers \
