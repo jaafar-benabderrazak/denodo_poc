@@ -279,7 +279,8 @@ cat > /tmp/keycloak-provider-task.json <<EOF
           "valueFrom": "${ADMIN_SECRET_ARN}:password::"
         }
       ],
-      "command": ["start"],
+      "entryPoint": ["/bin/bash", "-c"],
+      "command": ["/opt/keycloak/bin/kc.sh start & KC_PID=\$!; until /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth --realm master --user admin --password \$KEYCLOAK_ADMIN_PASSWORD 2>/dev/null; do sleep 10; done; /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE 2>/dev/null; wait \$KC_PID"],
       "healthCheck": {
         "command": ["CMD-SHELL", "curl -f http://localhost:8080/auth/health/ready || exit 1"],
         "interval": 30,
@@ -353,7 +354,8 @@ cat > /tmp/keycloak-consumer-task.json <<EOF
           "valueFrom": "${ADMIN_SECRET_ARN}:password::"
         }
       ],
-      "command": ["start"],
+      "entryPoint": ["/bin/bash", "-c"],
+      "command": ["/opt/keycloak/bin/kc.sh start & KC_PID=\$!; until /opt/keycloak/bin/kcadm.sh config credentials --server http://localhost:8080/auth --realm master --user admin --password \$KEYCLOAK_ADMIN_PASSWORD 2>/dev/null; do sleep 10; done; /opt/keycloak/bin/kcadm.sh update realms/master -s sslRequired=NONE 2>/dev/null; wait \$KC_PID"],
       "healthCheck": {
         "command": ["CMD-SHELL", "curl -f http://localhost:8080/auth/health/ready || exit 1"],
         "interval": 30,
