@@ -108,14 +108,16 @@ fi
 log_info "VPC $VPC_ID validated"
 
 step "Discovering subnets"
+# Get private subnets (MapPublicIpOnLaunch=false)
 PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
-    --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*private*" \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
     --region $REGION \
     --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId' \
     --output json)
 
+# Get public subnets (MapPublicIpOnLaunch=true)
 PUBLIC_SUBNETS=$(aws ec2 describe-subnets \
-    --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*public*" \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
     --region $REGION \
     --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
     --output json)
@@ -131,8 +133,8 @@ if [ $PRIVATE_SUBNET_COUNT -lt 2 ]; then
     exit 1
 fi
 
-if [ $PUBLIC_SUBNET_COUNT -lt 2 ]; then
-    log_error "ALB requires at least 2 public subnets"
+if [ $PUBLIC_SUBNET_COUNT -lt 1 ]; then
+    log_error "ALB requires at least 1 public subnet"
     exit 1
 fi
 
@@ -140,7 +142,14 @@ fi
 PRIVATE_SUBNET_1=$(echo $PRIVATE_SUBNETS | jq -r '.[0]')
 PRIVATE_SUBNET_2=$(echo $PRIVATE_SUBNETS | jq -r '.[1]')
 PUBLIC_SUBNET_1=$(echo $PUBLIC_SUBNETS | jq -r '.[0]')
-PUBLIC_SUBNET_2=$(echo $PUBLIC_SUBNETS | jq -r '.[1]')
+
+# If only 1 public subnet, use it twice (ALB can work in single AZ for POC)
+if [ $PUBLIC_SUBNET_COUNT -eq 1 ]; then
+    log_warn "Only 1 public subnet found. Using same subnet for ALB (single AZ deployment)"
+    PUBLIC_SUBNET_2=$PUBLIC_SUBNET_1
+else
+    PUBLIC_SUBNET_2=$(echo $PUBLIC_SUBNETS | jq -r '.[1]')
+fi
 
 log_info "Using private subnets: $PRIVATE_SUBNET_1, $PRIVATE_SUBNET_2"
 log_info "Using public subnets: $PUBLIC_SUBNET_1, $PUBLIC_SUBNET_2"
