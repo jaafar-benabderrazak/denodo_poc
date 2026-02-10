@@ -541,7 +541,14 @@ aws ecs create-service \
     --health-check-grace-period-seconds 300 \
     --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
     --tags key=Project,value="$PROJECT_NAME" key=Component,value=keycloak-provider \
-    --region "$REGION" 2>&1 || log_warn "Provider service already exists"
+    --region "$REGION" 2>&1 || \
+    (log_warn "Provider service already exists, updating..." && \
+     aws ecs update-service \
+        --cluster "$ECS_CLUSTER_NAME" \
+        --service keycloak-provider \
+        --task-definition keycloak-provider \
+        --network-configuration "awsvpcConfiguration={subnets=[$PUBLIC_SUBNET_1,$PUBLIC_SUBNET_2],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
+        --region "$REGION" > /dev/null)
 
 log_success "Keycloak Provider service created"
 
@@ -559,7 +566,14 @@ aws ecs create-service \
     --health-check-grace-period-seconds 300 \
     --deployment-configuration "maximumPercent=200,minimumHealthyPercent=100" \
     --tags key=Project,value="$PROJECT_NAME" key=Component,value=keycloak-consumer \
-    --region "$REGION" 2>&1 || log_warn "Consumer service already exists"
+    --region "$REGION" 2>&1 || \
+    (log_warn "Consumer service already exists, updating..." && \
+     aws ecs update-service \
+        --cluster "$ECS_CLUSTER_NAME" \
+        --service keycloak-consumer \
+        --task-definition keycloak-consumer \
+        --network-configuration "awsvpcConfiguration={subnets=[$PUBLIC_SUBNET_1,$PUBLIC_SUBNET_2],securityGroups=[$ECS_SG_ID],assignPublicIp=ENABLED}" \
+        --region "$REGION" > /dev/null)
 
 log_success "Keycloak Consumer service created"
 
