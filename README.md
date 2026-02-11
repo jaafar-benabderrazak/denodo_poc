@@ -82,14 +82,23 @@ chmod +x scripts/*.sh
 # Phase 1: Infrastructure
 ./scripts/deploy-denodo-keycloak.sh
 
-# Phase 2: ECS Cluster & Keycloak (à créer)
+# Phase 2: ECS Cluster & Keycloak
 ./scripts/deploy-ecs-keycloak.sh
 
-# Phase 3: Configure OIDC Federation (à créer)
+# Phase 2.5: Load OpenData schema + sample data
+./scripts/load-opendata.sh
+
+# Phase 3: Configure OIDC Federation
 ./scripts/configure-keycloak.sh
 
-# Phase 4: Deploy Lambda API (à créer)
+# Phase 4: Deploy Lambda API
 ./scripts/deploy-lambda-api.sh
+```
+
+#### Option 4: Déploiement Complet (enchaîné)
+
+```bash
+./scripts/deploy-all.sh
 ```
 
 ### What Gets Created
