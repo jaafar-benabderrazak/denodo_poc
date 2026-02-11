@@ -107,11 +107,35 @@ fi
 export PGPASSWORD="$DB_PASSWORD"
 
 log_step "0" "Ensuring database 'opendata' exists"
-if ! psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
-  log_warn "Database opendata not reachable yet; attempting to create it via 'postgres' database"
-  psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d postgres -p 5432 -c "CREATE DATABASE opendata;" >/dev/null 2>&1 || true
+# Try connecting to opendata database directly
+if psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
+  log_success "Database opendata is ready"
+else
+  log_warn "Database 'opendata' not accessible; checking if it needs to be created"
+  
+  # Check what databases exist
+  EXISTING_DBS=$(psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d postgres -p 5432 -t -c "SELECT datname FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | xargs || echo "")
+  
+  if [ -z "$EXISTING_DBS" ]; then
+    log_info "Creating database 'opendata'..."
+    psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d postgres -p 5432 -c "CREATE DATABASE opendata;" 2>&1 || {
+      log_error "Failed to create database. Check permissions and RDS configuration."
+      log_info "Attempting to use existing 'postgres' database instead..."
+      # Note: This is a fallback - the schema creation might still work if we're already in the right DB
+    }
+  fi
+  
+  # Verify connection again
+  if psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
+    log_success "Database opendata is ready"
+  else
+    log_error "Cannot connect to database 'opendata'. The RDS instance might have been created with a different initial database name."
+    log_info "Checking RDS instance configuration..."
+    log_info "RDS Endpoint: $OPENDATA_DB_ENDPOINT"
+    log_info "Username: denodo"
+    exit 1
+  fi
 fi
-log_success "Database opendata is ready"
 
 log_step "1" "Initializing OpenData schema"
 psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -f "$SQL_SCHEMA_FILE" >/dev/null
