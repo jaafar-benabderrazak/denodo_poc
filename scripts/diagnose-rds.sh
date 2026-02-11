@@ -33,14 +33,18 @@ fi
 
 REGION=$(jq -r '.region' "$DEPLOYMENT_INFO")
 PROJECT_NAME=$(jq -r '.projectName' "$DEPLOYMENT_INFO")
-OPENDATA_DB_ID=$(jq -r '.rdsInstances.opendata' "$DEPLOYMENT_INFO")
-OPENDATA_DB_ENDPOINT=$(jq -r '.rdsEndpoints.opendata' "$DEPLOYMENT_INFO")
+OPENDATA_DB_ID=$(jq -r '.rdsInstances.opendata // empty' "$DEPLOYMENT_INFO")
+OPENDATA_DB_ENDPOINT=$(jq -r '.rdsEndpoints.opendata // empty' "$DEPLOYMENT_INFO")
+
+# If instance ID is missing, derive from project name
+if [ -z "$OPENDATA_DB_ID" ] || [ "$OPENDATA_DB_ID" == "null" ]; then
+  OPENDATA_DB_ID="${PROJECT_NAME}-opendata-db"
+  log_warn "RDS instance ID not in deployment-info.json, using: $OPENDATA_DB_ID"
+fi
 
 log_info "Region: $REGION"
 log_info "Project: $PROJECT_NAME"
 log_info "RDS Instance ID: $OPENDATA_DB_ID"
-log_info "RDS Endpoint: $OPENDATA_DB_ENDPOINT"
-echo ""
 
 # Get DB credentials from Secrets Manager
 DB_SECRET=$(aws secretsmanager get-secret-value \
@@ -56,30 +60,38 @@ log_info "Username from secret: $DB_USER"
 log_info "Database name from secret: $DB_NAME"
 echo ""
 
-# Check RDS instance details
-log_info "Checking RDS instance configuration..."
+# Check RDS instance details to get the actual endpoint
+log_info "Querying RDS instance configuration..."
 RDS_INFO=$(aws rds describe-db-instances \
   --db-instance-identifier "$OPENDATA_DB_ID" \
   --region "$REGION" 2>&1)
 
 if [ $? -ne 0 ]; then
   log_error "Cannot find RDS instance: $OPENDATA_DB_ID"
+  log_error "Error: $RDS_INFO"
   exit 1
 fi
+
+# Get endpoint from RDS if not in deployment-info
+RDS_ENDPOINT=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Endpoint.Address')
+if [ -z "$OPENDATA_DB_ENDPOINT" ] || [ "$OPENDATA_DB_ENDPOINT" == "null" ]; then
+  OPENDATA_DB_ENDPOINT="$RDS_ENDPOINT"
+fi
+
+log_info "RDS Endpoint: $OPENDATA_DB_ENDPOINT"
 
 RDS_STATUS=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].DBInstanceStatus')
 RDS_ENGINE=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Engine')
 RDS_ENGINE_VERSION=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].EngineVersion')
 RDS_MASTER_USER=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].MasterUsername')
 RDS_DB_NAME=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].DBName // "null"')
-RDS_ENDPOINT=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Endpoint.Address')
 RDS_PORT=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Endpoint.Port')
 
 log_info "RDS Status: $RDS_STATUS"
 log_info "Engine: $RDS_ENGINE $RDS_ENGINE_VERSION"
 log_info "Master Username: $RDS_MASTER_USER"
 log_info "Initial Database Name (DBName): $RDS_DB_NAME"
-log_info "Endpoint: $RDS_ENDPOINT:$RDS_PORT"
+log_info "Port: $RDS_PORT"
 echo ""
 
 # Check if DBName is set
@@ -148,10 +160,12 @@ if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -c "SE
     fi
   else
     log_warn "Database 'opendata' does NOT exist"
-    log_info "You need to create it with:"
-    echo ""
-    echo "  psql -h $OPENDATA_DB_ENDPOINT -U $DB_USER -d $DEFAULT_DB -p 5432 -c \"CREATE DATABASE opendata;\""
-    echo ""
+    log_info "Creating database 'opendata'..."
+    if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -c "CREATE DATABASE opendata;" 2>&1; then
+      log_info "✓ Database 'opendata' created successfully"
+    else
+      log_error "Failed to create database 'opendata'"
+    fi
   fi
   
 else
