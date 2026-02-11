@@ -23,6 +23,9 @@
 
 set -e
 
+# Error trap for debugging - prints the line number where the script fails
+trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO. Command: $BASH_COMMAND\033[0m"' ERR
+
 # Configuration
 REGION="eu-west-3"
 VPC_ID="vpc-08ffb9d90f07533d0"
@@ -50,7 +53,7 @@ TOTAL_STEPS=20
 CURRENT_STEP=0
 
 step() {
-    ((CURRENT_STEP++))
+    CURRENT_STEP=$((CURRENT_STEP + 1))
     log_step $CURRENT_STEP $TOTAL_STEPS "$1"
 }
 
@@ -70,7 +73,7 @@ AWS_CLI_VERSION=$(aws --version 2>&1 | cut -d' ' -f1 | cut -d'/' -f2)
 log_info "AWS CLI version: $AWS_CLI_VERSION"
 
 step "Validating AWS credentials"
-CALLER_IDENTITY=$(aws sts get-caller-identity --region $REGION 2>/dev/null)
+CALLER_IDENTITY=$(aws sts get-caller-identity --region $REGION 2>&1)
 if [ $? -ne 0 ]; then
     log_error "AWS credentials are not configured properly"
     exit 1
@@ -100,7 +103,7 @@ done
 log_info "All required tools are installed"
 
 step "Validating VPC exists"
-VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --region $REGION --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "")
+VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --region $REGION --query 'Vpcs[0].VpcId' --output text 2>&1 || echo "")
 if [ -z "$VPC_EXISTS" ] || [ "$VPC_EXISTS" == "None" ]; then
     log_error "VPC $VPC_ID does not exist in region $REGION"
     exit 1
@@ -108,23 +111,28 @@ fi
 log_info "VPC $VPC_ID validated"
 
 step "Discovering subnets"
+# Get private subnets (not public by name and MapPublicIpOnLaunch=false)
 PRIVATE_SUBNETS=$(aws ec2 describe-subnets \
-    --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*private*" \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
     --region $REGION \
     --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId' \
     --output json)
 
-PUBLIC_SUBNETS=$(aws ec2 describe-subnets \
-    --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:Name,Values=*public*" \
+# Get public subnets: by MapPublicIpOnLaunch=true OR Name tag containing 'public'
+# This catches subnets like "ADS VPC-subnet-public*" that have IGW routes but MapPublicIpOnLaunch=false
+ALL_SUBNETS_JSON=$(aws ec2 describe-subnets \
+    --filters "Name=vpc-id,Values=$VPC_ID" \
     --region $REGION \
-    --query 'Subnets[?MapPublicIpOnLaunch==`true`].SubnetId' \
+    --query 'Subnets[].{Id:SubnetId,AZ:AvailabilityZone,Public:MapPublicIpOnLaunch,Name:Tags[?Key==`Name`].Value|[0]}' \
     --output json)
+
+PUBLIC_SUBNETS=$(echo "$ALL_SUBNETS_JSON" | jq '[.[] | select(.Public == true or (.Name // "" | test("public";"i")))] | unique_by(.AZ) | [.[].Id]')
 
 PRIVATE_SUBNET_COUNT=$(echo $PRIVATE_SUBNETS | jq '. | length')
 PUBLIC_SUBNET_COUNT=$(echo $PUBLIC_SUBNETS | jq '. | length')
 
 log_info "Found $PRIVATE_SUBNET_COUNT private subnets"
-log_info "Found $PUBLIC_SUBNET_COUNT public subnets"
+log_info "Found $PUBLIC_SUBNET_COUNT public subnets (by flag or name)"
 
 if [ $PRIVATE_SUBNET_COUNT -lt 2 ]; then
     log_error "ECS Fargate requires at least 2 private subnets in different AZs"
@@ -132,7 +140,8 @@ if [ $PRIVATE_SUBNET_COUNT -lt 2 ]; then
 fi
 
 if [ $PUBLIC_SUBNET_COUNT -lt 2 ]; then
-    log_error "ALB requires at least 2 public subnets"
+    log_error "ALB requires at least 2 public subnets in different AZs"
+    log_error "Found subnets: $(echo $PUBLIC_SUBNETS | jq -r 'join(", ")')"
     exit 1
 fi
 
@@ -262,7 +271,7 @@ if [ ! -z "$DENODO_SG" ] && [ "$DENODO_SG" != "None" ]; then
     aws ec2 authorize-security-group-ingress \
         --group-id $ECS_SG_ID \
         --protocol tcp --port 8080 --source-group $DENODO_SG \
-        --region $REGION 2>/dev/null || log_warn "Denodo to Keycloak rule already exists"
+        --region $REGION 2>&1 || log_warn "Denodo to Keycloak rule already exists"
 fi
 
 ###############################################################################
@@ -284,7 +293,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/provider/db" \
     --description "Keycloak Provider database credentials" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/provider/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\"}" \
@@ -297,7 +306,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/consumer/db" \
     --description "Keycloak Consumer database credentials" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_CONSUMER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_consumer\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/consumer/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_CONSUMER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_consumer\"}" \
@@ -310,7 +319,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/opendata/db" \
     --description "OpenData database credentials" \
     --secret-string "{\"username\":\"denodo\",\"password\":\"$OPENDATA_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"opendata\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/opendata/db" \
     --secret-string "{\"username\":\"denodo\",\"password\":\"$OPENDATA_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"opendata\"}" \
@@ -323,7 +332,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/admin" \
     --description "Keycloak admin credentials" \
     --secret-string "{\"username\":\"admin\",\"password\":\"$KEYCLOAK_ADMIN_PASSWORD\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/admin" \
     --secret-string "{\"username\":\"admin\",\"password\":\"$KEYCLOAK_ADMIN_PASSWORD\"}" \
@@ -336,7 +345,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/client-secret" \
     --description "OIDC client secret for federation" \
     --secret-string "{\"clientId\":\"denodo-consumer\",\"clientSecret\":\"$CLIENT_SECRET\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/client-secret" \
     --secret-string "{\"clientId\":\"denodo-consumer\",\"clientSecret\":\"$CLIENT_SECRET\"}" \
@@ -349,7 +358,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/api/auth-key" \
     --description "API Gateway authorization key" \
     --secret-string "{\"apiKey\":\"$API_KEY\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/api/auth-key" \
     --secret-string "{\"apiKey\":\"$API_KEY\"}" \
@@ -369,7 +378,7 @@ aws rds create-db-subnet-group \
     --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
     --db-subnet-group-description "Subnet group for Denodo POC databases" \
     --subnet-ids $PRIVATE_SUBNET_1 $PRIVATE_SUBNET_2 \
-    --region $REGION 2>/dev/null || log_warn "DB subnet group already exists"
+    --region $REGION 2>&1 || log_warn "DB subnet group already exists"
 
 log_info "DB Subnet Group: $DB_SUBNET_GROUP_NAME"
 
@@ -389,7 +398,7 @@ aws rds create-db-instance \
     --backup-retention-period 7 \
     --no-publicly-accessible \
     --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-provider" \
-    --region $REGION 2>/dev/null || log_warn "Keycloak Provider DB already exists"
+    --region $REGION 2>&1 || log_warn "Keycloak Provider DB already exists"
 
 log_info "Creating RDS instance: $PROVIDER_DB_ID (this may take 5-10 minutes)"
 
@@ -409,7 +418,7 @@ aws rds create-db-instance \
     --backup-retention-period 7 \
     --no-publicly-accessible \
     --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=keycloak-consumer" \
-    --region $REGION 2>/dev/null || log_warn "Keycloak Consumer DB already exists"
+    --region $REGION 2>&1 || log_warn "Keycloak Consumer DB already exists"
 
 log_info "Creating RDS instance: $CONSUMER_DB_ID (this may take 5-10 minutes)"
 
@@ -429,7 +438,7 @@ aws rds create-db-instance \
     --backup-retention-period 7 \
     --no-publicly-accessible \
     --tags "Key=Project,Value=$PROJECT_NAME" "Key=Component,Value=opendata" \
-    --region $REGION 2>/dev/null || log_warn "OpenData DB already exists"
+    --region $REGION 2>&1 || log_warn "OpenData DB already exists"
 
 log_info "Creating RDS instance: $OPENDATA_DB_ID (this may take 5-10 minutes)"
 
@@ -487,39 +496,55 @@ aws secretsmanager update-secret \
 # Save deployment info for next steps
 ###############################################################################
 
-cat > deployment-info.json <<EOF
-{
-  "region": "$REGION",
-  "vpcId": "$VPC_ID",
-  "accountId": "$ACCOUNT_ID",
-  "projectName": "$PROJECT_NAME",
-  "ecsClusterName": "$ECS_CLUSTER_NAME",
-  "securityGroups": {
-    "alb": "$ALB_SG_ID",
-    "ecs": "$ECS_SG_ID",
-    "rds": "$RDS_SG_ID",
-    "opendataRds": "$OPENDATA_RDS_SG_ID"
-  },
-  "subnets": {
-    "private": ["$PRIVATE_SUBNET_1", "$PRIVATE_SUBNET_2"],
-    "public": ["$PUBLIC_SUBNET_1", "$PUBLIC_SUBNET_2"]
-  },
-  "rdsEndpoints": {
-    "provider": "$PROVIDER_DB_ENDPOINT",
-    "consumer": "$CONSUMER_DB_ENDPOINT",
-    "opendata": "$OPENDATA_DB_ENDPOINT"
-  },
-  "secrets": {
-    "providerDb": "${PROJECT_NAME}/keycloak/provider/db",
-    "consumerDb": "${PROJECT_NAME}/keycloak/consumer/db",
-    "opendataDb": "${PROJECT_NAME}/opendata/db",
-    "keycloakAdmin": "${PROJECT_NAME}/keycloak/admin",
-    "clientSecret": "${PROJECT_NAME}/keycloak/client-secret",
-    "apiKey": "${PROJECT_NAME}/api/auth-key"
-  },
-  "deploymentTimestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-}
-EOF
+jq -n \
+  --arg region "$REGION" \
+  --arg vpcId "$VPC_ID" \
+  --arg accountId "$ACCOUNT_ID" \
+  --arg projectName "$PROJECT_NAME" \
+  --arg ecsClusterName "$ECS_CLUSTER_NAME" \
+  --arg albSg "$ALB_SG_ID" \
+  --arg ecsSg "$ECS_SG_ID" \
+  --arg rdsSg "$RDS_SG_ID" \
+  --arg opendataRdsSg "$OPENDATA_RDS_SG_ID" \
+  --arg privSub1 "$PRIVATE_SUBNET_1" \
+  --arg privSub2 "$PRIVATE_SUBNET_2" \
+  --arg pubSub1 "$PUBLIC_SUBNET_1" \
+  --arg pubSub2 "$PUBLIC_SUBNET_2" \
+  --arg provDb "$PROVIDER_DB_ENDPOINT" \
+  --arg consDb "$CONSUMER_DB_ENDPOINT" \
+  --arg openDb "$OPENDATA_DB_ENDPOINT" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{
+    region: $region,
+    vpcId: $vpcId,
+    accountId: $accountId,
+    projectName: $projectName,
+    ecsClusterName: $ecsClusterName,
+    securityGroups: {
+      alb: $albSg,
+      ecs: $ecsSg,
+      rds: $rdsSg,
+      opendataRds: $opendataRdsSg
+    },
+    subnets: {
+      private: [$privSub1, $privSub2],
+      public: [$pubSub1, $pubSub2]
+    },
+    rdsEndpoints: {
+      provider: $provDb,
+      consumer: $consDb,
+      opendata: $openDb
+    },
+    secrets: {
+      providerDb: ($projectName + "/keycloak/provider/db"),
+      consumerDb: ($projectName + "/keycloak/consumer/db"),
+      opendataDb: ($projectName + "/opendata/db"),
+      keycloakAdmin: ($projectName + "/keycloak/admin"),
+      clientSecret: ($projectName + "/keycloak/client-secret"),
+      apiKey: ($projectName + "/api/auth-key")
+    },
+    deploymentTimestamp: $ts
+  }' > deployment-info.json
 
 log_section "PHASE 3 COMPLETE - Infrastructure Created"
 log_info "Deployment info saved to deployment-info.json"

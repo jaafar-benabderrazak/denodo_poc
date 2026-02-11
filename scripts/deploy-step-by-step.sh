@@ -12,6 +12,7 @@
 ###############################################################################
 
 set -e
+trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO. Command: $BASH_COMMAND\033[0m"' ERR
 
 # Configuration
 REGION="eu-west-3"
@@ -65,7 +66,7 @@ for tool in aws jq curl psql python3; do
 done
 
 log_step "0.2" "Validation des credentials AWS"
-CALLER_IDENTITY=$(aws sts get-caller-identity --region $REGION 2>/dev/null || echo "")
+CALLER_IDENTITY=$(aws sts get-caller-identity --region $REGION 2>&1 || echo "")
 if [ -z "$CALLER_IDENTITY" ]; then
     log_error "Credentials AWS non configurés"
     exit 1
@@ -76,7 +77,7 @@ log_success "Compte AWS: $CURRENT_ACCOUNT"
 log_success "Région: $REGION"
 
 log_step "0.3" "Validation du VPC"
-VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --region $REGION --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "")
+VPC_EXISTS=$(aws ec2 describe-vpcs --vpc-ids $VPC_ID --region $REGION --query 'Vpcs[0].VpcId' --output text 2>&1 || echo "")
 if [ -z "$VPC_EXISTS" ]; then
     log_error "VPC $VPC_ID introuvable"
     exit 1
@@ -119,15 +120,15 @@ ALB_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak ALB" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-alb-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
         --query 'SecurityGroups[0].GroupId' \
         --output text)
 
-aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0 --region $REGION 2>/dev/null || true
-aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0 --region $REGION 2>/dev/null || true
+aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 80 --cidr 0.0.0.0/0 --region $REGION 2>&1 || true
+aws ec2 authorize-security-group-ingress --group-id $ALB_SG_ID --protocol tcp --port 443 --cidr 0.0.0.0/0 --region $REGION 2>&1 || true
 log_success "ALB SG créé: $ALB_SG_ID"
 
 log_step "1.3" "Création du Security Group ECS"
@@ -136,14 +137,14 @@ ECS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak ECS tasks" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-ecs-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
         --query 'SecurityGroups[0].GroupId' \
         --output text)
 
-aws ec2 authorize-security-group-ingress --group-id $ECS_SG_ID --protocol tcp --port 8080 --source-group $ALB_SG_ID --region $REGION 2>/dev/null || true
+aws ec2 authorize-security-group-ingress --group-id $ECS_SG_ID --protocol tcp --port 8080 --source-group $ALB_SG_ID --region $REGION 2>&1 || true
 log_success "ECS SG créé: $ECS_SG_ID"
 
 log_step "1.4" "Création du Security Group RDS Keycloak"
@@ -152,14 +153,14 @@ RDS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for Keycloak RDS databases" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-keycloak-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
         --query 'SecurityGroups[0].GroupId' \
         --output text)
 
-aws ec2 authorize-security-group-ingress --group-id $RDS_SG_ID --protocol tcp --port 5432 --source-group $ECS_SG_ID --region $REGION 2>/dev/null || true
+aws ec2 authorize-security-group-ingress --group-id $RDS_SG_ID --protocol tcp --port 5432 --source-group $ECS_SG_ID --region $REGION 2>&1 || true
 log_success "RDS Keycloak SG créé: $RDS_SG_ID"
 
 log_step "1.5" "Création du Security Group RDS OpenData"
@@ -168,7 +169,7 @@ OPENDATA_RDS_SG_ID=$(aws ec2 create-security-group \
     --description "Security group for OpenData RDS database" \
     --vpc-id $VPC_ID \
     --region $REGION \
-    --output text --query 'GroupId' 2>/dev/null || \
+    --output text --query 'GroupId' 2>&1 || \
     aws ec2 describe-security-groups \
         --filters "Name=group-name,Values=${PROJECT_NAME}-opendata-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
         --region $REGION \
@@ -176,8 +177,8 @@ OPENDATA_RDS_SG_ID=$(aws ec2 create-security-group \
         --output text)
 
 DENODO_EC2_IP="10.0.75.195"
-aws ec2 authorize-security-group-ingress --group-id $OPENDATA_RDS_SG_ID --protocol tcp --port 5432 --cidr "${DENODO_EC2_IP}/32" --region $REGION 2>/dev/null || true
-aws ec2 authorize-security-group-ingress --group-id $OPENDATA_RDS_SG_ID --protocol tcp --port 5432 --source-group $ECS_SG_ID --region $REGION 2>/dev/null || true
+aws ec2 authorize-security-group-ingress --group-id $OPENDATA_RDS_SG_ID --protocol tcp --port 5432 --cidr "${DENODO_EC2_IP}/32" --region $REGION 2>&1 || true
+aws ec2 authorize-security-group-ingress --group-id $OPENDATA_RDS_SG_ID --protocol tcp --port 5432 --source-group $ECS_SG_ID --region $REGION 2>&1 || true
 log_success "RDS OpenData SG créé: $OPENDATA_RDS_SG_ID"
 
 log_success "Phase 1 terminée - Security Groups créés"
@@ -205,7 +206,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/provider/db" \
     --description "Keycloak Provider database credentials" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/provider/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_PROVIDER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_provider\"}" \
@@ -217,7 +218,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/consumer/db" \
     --description "Keycloak Consumer database credentials" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_CONSUMER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_consumer\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/consumer/db" \
     --secret-string "{\"username\":\"keycloak\",\"password\":\"$KEYCLOAK_CONSUMER_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"keycloak_consumer\"}" \
@@ -229,7 +230,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/opendata/db" \
     --description "OpenData database credentials" \
     --secret-string "{\"username\":\"denodo\",\"password\":\"$OPENDATA_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"opendata\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/opendata/db" \
     --secret-string "{\"username\":\"denodo\",\"password\":\"$OPENDATA_DB_PASSWORD\",\"engine\":\"postgres\",\"port\":5432,\"dbname\":\"opendata\"}" \
@@ -241,7 +242,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/admin" \
     --description "Keycloak admin credentials" \
     --secret-string "{\"username\":\"admin\",\"password\":\"$KEYCLOAK_ADMIN_PASSWORD\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/admin" \
     --secret-string "{\"username\":\"admin\",\"password\":\"$KEYCLOAK_ADMIN_PASSWORD\"}" \
@@ -253,7 +254,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/keycloak/client-secret" \
     --description "OIDC client secret for federation" \
     --secret-string "{\"clientId\":\"denodo-consumer\",\"clientSecret\":\"$CLIENT_SECRET\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/keycloak/client-secret" \
     --secret-string "{\"clientId\":\"denodo-consumer\",\"clientSecret\":\"$CLIENT_SECRET\"}" \
@@ -265,7 +266,7 @@ aws secretsmanager create-secret \
     --name "${PROJECT_NAME}/api/auth-key" \
     --description "API Gateway authorization key" \
     --secret-string "{\"apiKey\":\"$API_KEY\"}" \
-    --region $REGION 2>/dev/null || \
+    --region $REGION 2>&1 || \
 aws secretsmanager update-secret \
     --secret-id "${PROJECT_NAME}/api/auth-key" \
     --secret-string "{\"apiKey\":\"$API_KEY\"}" \
@@ -287,7 +288,7 @@ aws rds create-db-subnet-group \
     --db-subnet-group-name $DB_SUBNET_GROUP_NAME \
     --db-subnet-group-description "Subnet group for Denodo POC databases" \
     --subnet-ids $PRIVATE_SUBNET_1 $PRIVATE_SUBNET_2 \
-    --region $REGION 2>/dev/null || log_warn "DB subnet group existe déjà"
+    --region $REGION 2>&1 || log_warn "DB subnet group existe déjà"
 log_success "DB Subnet Group: $DB_SUBNET_GROUP_NAME"
 
 log_step "3.2" "Vérification des instances RDS existantes"
@@ -299,7 +300,7 @@ check_rds_status() {
         --db-instance-identifier $db_id \
         --region $REGION \
         --query 'DBInstances[0].DBInstanceStatus' \
-        --output text 2>/dev/null || echo "not-found"
+        --output text 2>&1 || echo "not-found"
 }
 
 # Function to wait for deletion
@@ -420,19 +421,19 @@ log_info "Cela peut prendre 10-15 minutes..."
 # Wait only if instances need to become available
 if [ "$PROVIDER_STATUS" != "available" ]; then
     log_info "Attente Provider DB..."
-    aws rds wait db-instance-available --db-instance-identifier $PROVIDER_DB_ID --region $REGION 2>/dev/null || log_warn "Timeout Provider DB"
+    aws rds wait db-instance-available --db-instance-identifier $PROVIDER_DB_ID --region $REGION 2>&1 || log_warn "Timeout Provider DB"
 fi
 log_success "Keycloak Provider DB disponible"
 
 if [ "$CONSUMER_STATUS" != "available" ]; then
     log_info "Attente Consumer DB..."
-    aws rds wait db-instance-available --db-instance-identifier $CONSUMER_DB_ID --region $REGION 2>/dev/null || log_warn "Timeout Consumer DB"
+    aws rds wait db-instance-available --db-instance-identifier $CONSUMER_DB_ID --region $REGION 2>&1 || log_warn "Timeout Consumer DB"
 fi
 log_success "Keycloak Consumer DB disponible"
 
 if [ "$OPENDATA_STATUS" != "available" ]; then
     log_info "Attente OpenData DB..."
-    aws rds wait db-instance-available --db-instance-identifier $OPENDATA_DB_ID --region $REGION 2>/dev/null || log_warn "Timeout OpenData DB"
+    aws rds wait db-instance-available --db-instance-identifier $OPENDATA_DB_ID --region $REGION 2>&1 || log_warn "Timeout OpenData DB"
 fi
 log_success "OpenData DB disponible"
 
@@ -449,7 +450,7 @@ get_endpoint_with_retry() {
             --db-instance-identifier $db_id \
             --region $REGION \
             --query 'DBInstances[0].Endpoint.Address' \
-            --output text 2>/dev/null)
+            --output text 2>&1)
         
         if [ ! -z "$ENDPOINT" ] && [ "$ENDPOINT" != "None" ]; then
             echo $ENDPOINT

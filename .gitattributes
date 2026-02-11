@@ -1,0 +1,5 @@
+# Force LF line endings for shell scripts (required for bash in CloudShell)
+*.sh text eol=lf
+*.sql text eol=lf
+*.json text eol=lf
+*.py text eol=lf
