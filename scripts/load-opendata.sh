@@ -230,7 +230,7 @@ run_psql() {
 }
 
 ###############################################################################
-# Helper: run_psql_file -- execute SQL file via psql (SSM transfers file)
+# Helper: run_psql_file -- execute SQL file via psql (uses S3 for SSM mode)
 ###############################################################################
 run_psql_file() {
   local db="$1"
@@ -239,23 +239,34 @@ run_psql_file() {
   local extra_args="$@"
 
   if [ "$USE_SSM" == "true" ]; then
-    # Transfer SQL file to EC2 and execute it there
-    log_info "Transferring SQL file to Denodo EC2..."
+    # For SSM mode, upload SQL file to S3, then download on EC2
+    log_info "Uploading SQL file to S3..."
     
+    local S3_BUCKET="aws-cloudshell-$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || echo 'temp')"
+    local S3_KEY="denodo-poc-temp/$(date +%s)-$(basename "$sql_file")"
+    local S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
+    
+    # Upload to S3
+    aws s3 cp "$sql_file" "$S3_URI" --region "$REGION" 2>&1 || {
+      log_error "Failed to upload SQL file to S3"
+      return 1
+    }
+    
+    log_info "Executing SQL on Denodo EC2..."
     local REMOTE_TMP="/tmp/opendata-$(basename "$sql_file")"
-    local SQL_CONTENT=$(cat "$sql_file" | base64 -w 0 2>/dev/null || base64 "$sql_file")
-    
-    local TRANSFER_CMD="echo '${SQL_CONTENT}' | base64 -d > '${REMOTE_TMP}' && PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_DB_ENDPOINT}' -U denodo -d '${db}' -p 5432 -f '${REMOTE_TMP}' ${extra_args} && rm -f '${REMOTE_TMP}'"
+    local EXEC_CMD="aws s3 cp '${S3_URI}' '${REMOTE_TMP}' --region '${REGION}' && PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_DB_ENDPOINT}' -U denodo -d '${db}' -p 5432 -f '${REMOTE_TMP}' ${extra_args} && rm -f '${REMOTE_TMP}'"
     
     local CMD_ID
     CMD_ID=$(aws ssm send-command \
       --instance-ids "$DENODO_INSTANCE_ID" \
       --document-name AWS-RunShellScript \
-      --parameters "commands=[\"${TRANSFER_CMD}\"]" \
+      --parameters "commands=[\"${EXEC_CMD}\"]" \
       --region "$REGION" \
       --query 'Command.CommandId' --output text 2>/dev/null || echo "")
 
     if [ -z "$CMD_ID" ] || [ "$CMD_ID" == "None" ]; then
+      aws s3 rm "$S3_URI" --region "$REGION" 2>/dev/null || true
+      log_error "Failed to start SSM command"
       return 1
     fi
 
@@ -272,9 +283,13 @@ run_psql_file() {
         --query 'Status' --output text 2>/dev/null || echo "InProgress")
       if [ "$WAIT_SECS" -ge 300 ]; then
         log_warn "SSM command timed out after ${WAIT_SECS}s"
+        aws s3 rm "$S3_URI" --region "$REGION" 2>/dev/null || true
         return 1
       fi
     done
+
+    # Cleanup S3 file
+    aws s3 rm "$S3_URI" --region "$REGION" 2>/dev/null || true
 
     if [ "$CMD_STATUS" == "Success" ]; then
       aws ssm get-command-invocation \
@@ -284,6 +299,7 @@ run_psql_file() {
         --query 'StandardOutputContent' --output text 2>/dev/null || true
       return 0
     else
+      log_error "SQL execution failed on EC2"
       aws ssm get-command-invocation \
         --command-id "$CMD_ID" \
         --instance-id "$DENODO_INSTANCE_ID" \
