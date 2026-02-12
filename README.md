@@ -214,19 +214,6 @@ aws ecs describe-services \
   --output table
 ```
 
-### Cost Estimation
-
-| Service | Monthly Cost |
-|---------|--------------|
-| ECS Fargate (2 tasks) | ~$35 |
-| RDS (3 instances) | ~$65 |
-| ALB | ~$22 |
-| Lambda + API Gateway | ~$2 |
-| Data Transfer | ~$1 |
-| Secrets Manager | ~$3 |
-| CloudWatch Logs | ~$2 |
-| **Total** | **~$130/month** |
-
 ### Cleanup
 
 ```bash
@@ -326,6 +313,7 @@ For issues or questions:
 ### Documentation
 
 - [Deployment Status](./docs/DEPLOYMENT_STATUS.md) -- current status, what is deployed, what remains
+- [Showcase Scenarios](./docs/SHOWCASE_SCENARIOS.md) -- 10 step-by-step demo scenarios with Mermaid diagrams
 - [Architecture Diagram](./docs/DENODO_KEYCLOAK_ARCHITECTURE.md) -- full technical architecture
 - [Project Summary](./PROJECT_SUMMARY.md)
 - [Quick Reference](./QUICK_REFERENCE.md)

@@ -575,25 +575,88 @@ flowchart LR
 | `scripts/diagnose-rds.sh` | Debug RDS connectivity issues | Troubleshooting |
 | `scripts/check-deployment-status.sh` | Quick status of all components | Anytime |
 | `scripts/cleanup-all.sh` | Delete all AWS resources | When done with POC |
+| `scripts/fix-lambda-api.sh` | Clean up duplicate APIs, redeploy Lambda | If API returns 500 |
 | `tests/test-all.sh` | Run all test suites | Validation |
 
 ---
 
-## 12. Cost Estimation
+## 12. Retrieving Secrets via CloudShell
 
-| Service | Configuration | Monthly Cost |
-|---------|---------------|-------------|
-| ECS Fargate | 2 tasks x 0.5 vCPU, 1 GB RAM | ~$35 |
-| RDS PostgreSQL | 3 instances (2x micro, 1x small) | ~$65 |
-| Application Load Balancer | 1 ALB | ~$22 |
-| Lambda + API Gateway | <100K requests/month | ~$2 |
-| Secrets Manager | 6 secrets | ~$3 |
-| CloudWatch Logs | ~5 GB/month | ~$2 |
-| Data Transfer | ~10 GB/month | ~$1 |
-| **Total** | | **~$130/month** |
+All credentials are stored in AWS Secrets Manager. Use these commands from CloudShell.
+
+### Keycloak Admin Password
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id denodo-poc/keycloak/admin \
+  --region eu-west-3 \
+  --query SecretString --output text | jq -r '.password'
+```
+
+### OpenData RDS Credentials
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id denodo-poc/opendata/db \
+  --region eu-west-3 \
+  --query SecretString --output text | jq '.'
+```
+
+Returns:
+
+```json
+{
+  "username": "denodo",
+  "password": "...",
+  "host": "denodo-poc-opendata-db.cacjdkje8yxa.eu-west-3.rds.amazonaws.com",
+  "port": 5432,
+  "dbname": "opendata"
+}
+```
+
+### Keycloak OIDC Client Secret
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id denodo-poc/keycloak/client-secret \
+  --region eu-west-3 \
+  --query SecretString --output text | jq '.'
+```
+
+### Authorization API Key
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id denodo-poc/api/auth-key \
+  --region eu-west-3 \
+  --query SecretString --output text | jq -r '.apiKey'
+```
+
+### List All POC Secrets
+
+```bash
+aws secretsmanager list-secrets \
+  --region eu-west-3 \
+  --filters Key=name,Values=denodo-poc \
+  --query 'SecretList[].Name' --output table
+```
+
+### One-Liner: Export All Credentials
+
+```bash
+export KC_ADMIN_PWD=$(aws secretsmanager get-secret-value --secret-id denodo-poc/keycloak/admin --region eu-west-3 --query SecretString --output text | jq -r '.password')
+export DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id denodo-poc/opendata/db --region eu-west-3 --query SecretString --output text | jq -r '.password')
+export CLIENT_SECRET=$(aws secretsmanager get-secret-value --secret-id denodo-poc/keycloak/client-secret --region eu-west-3 --query SecretString --output text | jq -r '.clientSecret')
+export API_KEY=$(aws secretsmanager get-secret-value --secret-id denodo-poc/api/auth-key --region eu-west-3 --query SecretString --output text | jq -r '.apiKey')
+
+echo "Keycloak admin:     $KC_ADMIN_PWD"
+echo "OpenData DB:        $DB_PASSWORD"
+echo "OIDC client secret: $CLIENT_SECRET"
+echo "API key:            $API_KEY"
+```
 
 ---
 
-**Document Version:** 2.0
+**Document Version:** 2.1
 **Last Updated:** 12 February 2026
 **Status:** Infrastructure 100% deployed -- awaiting Denodo platform integration

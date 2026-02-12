@@ -227,8 +227,19 @@ def lambda_handler(event, context):
             }
         
         # Extract user ID from path parameters
-        path_params = event.get('pathParameters', {})
+        # Note: pathParameters can be None (not just missing) in some API Gateway configs
+        path_params = event.get('pathParameters') or {}
         user_id = path_params.get('userId')
+        
+        # Also try extracting from the raw path if pathParameters is empty
+        if not user_id:
+            raw_path = event.get('path', '') or event.get('rawPath', '')
+            # Path format: /api/v1/users/{userId}/permissions
+            if '/users/' in raw_path and '/permissions' in raw_path:
+                import urllib.parse
+                path_segment = raw_path.split('/users/')[1].split('/permissions')[0]
+                user_id = urllib.parse.unquote(path_segment)
+                print(f"Extracted userId from path: {user_id}")
         
         if not user_id:
             return {
@@ -239,9 +250,18 @@ def lambda_handler(event, context):
                 },
                 'body': json.dumps({
                     'error': 'Bad Request',
-                    'message': 'userId parameter is required'
+                    'message': 'userId parameter is required',
+                    'debug': {
+                        'pathParameters': str(event.get('pathParameters')),
+                        'path': event.get('path', 'N/A'),
+                        'resource': event.get('resource', 'N/A')
+                    }
                 })
             }
+        
+        # URL-decode userId (@ may come as %40)
+        import urllib.parse
+        user_id = urllib.parse.unquote(user_id)
         
         # Get permissions
         permissions = get_user_permissions(user_id)
@@ -258,7 +278,9 @@ def lambda_handler(event, context):
         }
         
     except Exception as e:
-        print(f"Error: {str(e)}")
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"Error: {str(e)}\nTraceback:\n{error_trace}")
         return {
             'statusCode': 500,
             'headers': {
@@ -267,7 +289,8 @@ def lambda_handler(event, context):
             },
             'body': json.dumps({
                 'error': 'Internal Server Error',
-                'message': str(e)
+                'message': str(e),
+                'trace': error_trace
             })
         }
 
