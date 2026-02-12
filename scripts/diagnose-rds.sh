@@ -320,7 +320,7 @@ if [ $CONNECTION_TEST_EXIT -eq 0 ]; then
   echo ""
   
   # Check if opendata database exists
-  OPENDATA_EXISTS=$(run_psql "$DEFAULT_DB" -t -c "SELECT 1 FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | xargs)
+  OPENDATA_EXISTS=$(run_psql "$DEFAULT_DB" -t -c "SELECT 1 FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | tr -d '[:space:]')
   
   if [ "$OPENDATA_EXISTS" == "1" ]; then
     log_info "Database 'opendata' already exists"
