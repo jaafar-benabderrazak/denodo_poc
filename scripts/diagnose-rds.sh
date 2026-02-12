@@ -2,6 +2,11 @@
 ###############################################################################
 # RDS Diagnostic Script
 # Checks RDS instance configuration and database accessibility
+#
+# When running from AWS CloudShell (which cannot reach private RDS directly),
+# psql commands are executed remotely on the Denodo EC2 instance via SSM
+# RunShellScript. Direct psql is used when running from a host with network
+# access to the RDS (e.g. the Denodo EC2 itself).
 ###############################################################################
 
 set -e
@@ -35,6 +40,7 @@ REGION=$(jq -r '.region' "$DEPLOYMENT_INFO")
 PROJECT_NAME=$(jq -r '.projectName' "$DEPLOYMENT_INFO")
 OPENDATA_DB_ID=$(jq -r '.rdsInstances.opendata // empty' "$DEPLOYMENT_INFO")
 OPENDATA_DB_ENDPOINT=$(jq -r '.rdsEndpoints.opendata // empty' "$DEPLOYMENT_INFO")
+DENODO_INSTANCE_ID=$(jq -r '.denodo.instanceId // "i-0aef555dcb0ff873f"' "$DEPLOYMENT_INFO")
 
 # If instance ID is missing, derive from project name
 if [ -z "$OPENDATA_DB_ID" ] || [ "$OPENDATA_DB_ID" == "null" ]; then
@@ -86,13 +92,156 @@ RDS_ENGINE_VERSION=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].EngineVersion')
 RDS_MASTER_USER=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].MasterUsername')
 RDS_DB_NAME=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].DBName // "null"')
 RDS_PORT=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].Endpoint.Port')
+RDS_PUBLIC=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].PubliclyAccessible')
 
 log_info "RDS Status: $RDS_STATUS"
 log_info "Engine: $RDS_ENGINE $RDS_ENGINE_VERSION"
 log_info "Master Username: $RDS_MASTER_USER"
 log_info "Initial Database Name (DBName): $RDS_DB_NAME"
 log_info "Port: $RDS_PORT"
+log_info "Publicly Accessible: $RDS_PUBLIC"
 echo ""
+
+###############################################################################
+# Detect execution environment and choose connectivity method
+###############################################################################
+USE_SSM="false"
+
+if [ "${AWS_EXECUTION_ENV:-}" == "CloudShell" ] || [ "${CLOUDSHELL:-}" == "true" ]; then
+  log_warn "Running in AWS CloudShell -- RDS is in a private subnet, no direct access"
+  log_info "Will route psql commands through Denodo EC2 ($DENODO_INSTANCE_ID) via SSM"
+  USE_SSM="true"
+
+  # Verify the EC2 instance is SSM-managed and online
+  SSM_STATUS=$(aws ssm describe-instance-information \
+    --filters "Key=InstanceIds,Values=${DENODO_INSTANCE_ID}" \
+    --region "$REGION" \
+    --query 'InstanceInformationList[0].PingStatus' \
+    --output text 2>/dev/null || echo "Unknown")
+
+  if [ "$SSM_STATUS" != "Online" ]; then
+    log_error "Denodo EC2 ($DENODO_INSTANCE_ID) SSM status: $SSM_STATUS (expected: Online)"
+    log_error "Ensure SSM agent is running and the instance has the AmazonSSMManagedInstanceCore policy"
+    exit 1
+  fi
+  log_info "Denodo EC2 SSM status: Online"
+
+  # Verify psql is available on the EC2 instance
+  PSQL_CHECK_CMD_ID=$(aws ssm send-command \
+    --instance-ids "$DENODO_INSTANCE_ID" \
+    --document-name AWS-RunShellScript \
+    --parameters 'commands=["which psql || echo MISSING"]' \
+    --region "$REGION" \
+    --query 'Command.CommandId' --output text 2>/dev/null)
+
+  sleep 3
+  PSQL_CHECK_RESULT=$(aws ssm get-command-invocation \
+    --command-id "$PSQL_CHECK_CMD_ID" \
+    --instance-id "$DENODO_INSTANCE_ID" \
+    --region "$REGION" \
+    --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')
+
+  if [ "$PSQL_CHECK_RESULT" == "MISSING" ] || [ -z "$PSQL_CHECK_RESULT" ]; then
+    log_warn "psql not found on Denodo EC2 -- installing postgresql client..."
+    INSTALL_CMD_ID=$(aws ssm send-command \
+      --instance-ids "$DENODO_INSTANCE_ID" \
+      --document-name AWS-RunShellScript \
+      --parameters 'commands=["sudo yum install -y postgresql15 2>/dev/null || sudo yum install -y postgresql 2>/dev/null || sudo amazon-linux-extras install postgresql15 -y 2>/dev/null || echo INSTALL_FAILED"]' \
+      --region "$REGION" \
+      --query 'Command.CommandId' --output text 2>/dev/null)
+    sleep 10
+    INSTALL_STATUS=$(aws ssm get-command-invocation \
+      --command-id "$INSTALL_CMD_ID" \
+      --instance-id "$DENODO_INSTANCE_ID" \
+      --region "$REGION" \
+      --query 'Status' --output text 2>/dev/null)
+    if [ "$INSTALL_STATUS" != "Success" ]; then
+      log_error "Failed to install psql on Denodo EC2. Install postgresql client manually."
+      exit 1
+    fi
+    log_info "postgresql client installed on Denodo EC2"
+  else
+    log_info "psql available on Denodo EC2: $PSQL_CHECK_RESULT"
+  fi
+  echo ""
+fi
+
+###############################################################################
+# Helper: run_psql -- execute a psql command locally or via SSM
+#
+# Usage: run_psql <database> <psql_flags_and_query>
+# Returns: stdout from psql; exit code 0 on success, 1 on failure
+#
+# Examples:
+#   run_psql postgres "-c" "SELECT version();"
+#   run_psql opendata "-t" "-c" "SELECT count(*) FROM opendata.entreprises;"
+###############################################################################
+run_psql() {
+  local db="$1"
+  shift
+
+  if [ "$USE_SSM" == "true" ]; then
+    # Build the full psql command string for remote execution
+    local PSQL_CMD="PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_DB_ENDPOINT}' -U '${DB_USER}' -d '${db}' -p 5432"
+    # Append remaining arguments, quoting each one
+    for arg in "$@"; do
+      PSQL_CMD="$PSQL_CMD '$arg'"
+    done
+
+    # Use || echo "" to prevent set -e from killing the caller
+    local CMD_ID
+    CMD_ID=$(aws ssm send-command \
+      --instance-ids "$DENODO_INSTANCE_ID" \
+      --document-name AWS-RunShellScript \
+      --parameters "commands=[\"${PSQL_CMD}\"]" \
+      --region "$REGION" \
+      --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+    if [ -z "$CMD_ID" ] || [ "$CMD_ID" == "None" ]; then
+      return 1
+    fi
+
+    # Poll for completion (max ~30s)
+    local WAIT_SECS=0
+    local CMD_STATUS="InProgress"
+    while [ "$CMD_STATUS" == "InProgress" ] || [ "$CMD_STATUS" == "Pending" ]; do
+      sleep 2
+      WAIT_SECS=$((WAIT_SECS + 2))
+      CMD_STATUS=$(aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'Status' --output text 2>/dev/null || echo "InProgress")
+      if [ "$WAIT_SECS" -ge 30 ]; then
+        log_warn "SSM command timed out after ${WAIT_SECS}s (command: $CMD_ID)"
+        return 1
+      fi
+    done
+
+    if [ "$CMD_STATUS" == "Success" ]; then
+      aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'StandardOutputContent' --output text 2>/dev/null || true
+      return 0
+    else
+      aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'StandardErrorContent' --output text 2>/dev/null >&2 || true
+      return 1
+    fi
+  else
+    # Direct local psql
+    PGPASSWORD="$DB_PASSWORD" psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$db" -p 5432 "$@"
+  fi
+}
+
+###############################################################################
+# Database checks
+###############################################################################
 
 # Check if DBName is set
 if [ "$RDS_DB_NAME" == "null" ] || [ -z "$RDS_DB_NAME" ]; then
@@ -108,15 +257,18 @@ fi
 
 # Test connection to default database
 log_info "Testing connection to default database ($DEFAULT_DB)..."
-export PGPASSWORD="$DB_PASSWORD"
+if [ "$USE_SSM" == "false" ]; then
+  export PGPASSWORD="$DB_PASSWORD"
+fi
 
-if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -c "SELECT version();" >/dev/null 2>&1; then
-  log_info "✓ Successfully connected to database: $DEFAULT_DB"
+if run_psql "$DEFAULT_DB" -c "SELECT version();" >/dev/null 2>&1; then
+  log_info "Successfully connected to database: $DEFAULT_DB"
   
   # List all databases
   log_info "Listing all databases..."
-  DATABASES=$(psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -t -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null)
+  DATABASES=$(run_psql "$DEFAULT_DB" -t -c "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname;" 2>/dev/null)
   echo "$DATABASES" | while read db; do
+    db=$(echo "$db" | xargs)
     if [ ! -z "$db" ]; then
       echo "  - $db"
     fi
@@ -124,28 +276,29 @@ if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -c "SE
   echo ""
   
   # Check if opendata database exists
-  OPENDATA_EXISTS=$(psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -t -c "SELECT 1 FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | xargs)
+  OPENDATA_EXISTS=$(run_psql "$DEFAULT_DB" -t -c "SELECT 1 FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | xargs)
   
   if [ "$OPENDATA_EXISTS" == "1" ]; then
-    log_info "✓ Database 'opendata' already exists"
+    log_info "Database 'opendata' already exists"
     
     # Test connection to opendata database
-    if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "opendata" -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
-      log_info "✓ Can connect to 'opendata' database"
+    if run_psql "opendata" -c "SELECT 1;" >/dev/null 2>&1; then
+      log_info "Can connect to 'opendata' database"
       
       # Check for opendata schema
-      SCHEMA_EXISTS=$(psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "opendata" -p 5432 -t -c "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'opendata';" 2>/dev/null | xargs)
+      SCHEMA_EXISTS=$(run_psql "opendata" -t -c "SELECT 1 FROM information_schema.schemata WHERE schema_name = 'opendata';" 2>/dev/null | xargs)
       
       if [ "$SCHEMA_EXISTS" == "1" ]; then
-        log_info "✓ Schema 'opendata' exists"
+        log_info "Schema 'opendata' exists"
         
         # Check tables
-        TABLES=$(psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "opendata" -p 5432 -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'opendata' ORDER BY tablename;" 2>/dev/null)
+        TABLES=$(run_psql "opendata" -t -c "SELECT tablename FROM pg_tables WHERE schemaname = 'opendata' ORDER BY tablename;" 2>/dev/null)
         if [ ! -z "$TABLES" ]; then
           log_info "Tables in opendata schema:"
           echo "$TABLES" | while read table; do
+            table=$(echo "$table" | xargs)
             if [ ! -z "$table" ]; then
-              COUNT=$(psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "opendata" -p 5432 -t -c "SELECT COUNT(*) FROM opendata.$table;" 2>/dev/null | xargs)
+              COUNT=$(run_psql "opendata" -t -c "SELECT COUNT(*) FROM opendata.${table};" 2>/dev/null | xargs)
               echo "  - $table ($COUNT rows)"
             fi
           done
@@ -161,19 +314,25 @@ if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -c "SE
   else
     log_warn "Database 'opendata' does NOT exist"
     log_info "Creating database 'opendata'..."
-    if psql -h "$OPENDATA_DB_ENDPOINT" -U "$DB_USER" -d "$DEFAULT_DB" -p 5432 -c "CREATE DATABASE opendata;" 2>&1; then
-      log_info "✓ Database 'opendata' created successfully"
+    if run_psql "$DEFAULT_DB" -c "CREATE DATABASE opendata;" 2>&1; then
+      log_info "Database 'opendata' created successfully"
     else
       log_error "Failed to create database 'opendata'"
     fi
   fi
   
 else
-  log_error "✗ Cannot connect to database: $DEFAULT_DB"
-  log_error "Check network connectivity, security groups, and credentials"
+  log_error "Cannot connect to database: $DEFAULT_DB"
+  if [ "$USE_SSM" == "true" ]; then
+    log_error "SSM command failed. Check that Denodo EC2 can reach RDS and credentials are correct."
+  else
+    log_error "Check network connectivity, security groups, and credentials"
+  fi
 fi
 
-unset PGPASSWORD
+if [ "$USE_SSM" == "false" ]; then
+  unset PGPASSWORD
+fi
 
 echo ""
 log_info "Diagnosis complete"
