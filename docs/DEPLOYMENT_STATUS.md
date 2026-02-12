@@ -343,50 +343,7 @@ graph TD
 
 ---
 
-## 6. Issues Resolved During Deployment
-
-```mermaid
-timeline
-    title Deployment Issues Timeline (Feb 5-12, 2026)
-    section Networking
-        ECS tasks fail to start : ResourceInitializationError
-                                : Fix: Public subnets + assignPublicIp
-        CloudShell cannot reach RDS : Private subnet isolation
-                                    : Fix: SSM send-command via Denodo EC2
-    section Database
-        DB name mismatch : database keycloak_provider not found
-                         : Fix: Use default postgres DB
-        Password mismatch : FATAL password authentication failed
-                          : Fix: fix-opendata-password.sh syncs SM and RDS
-        SQL file too large for SSM : Parameter size limit exceeded
-                                   : Fix: S3 bucket intermediary transfer
-    section Routing
-        Health check 502 : ALB path /health/ready 404
-                         : Fix: Changed to /auth/health/ready
-        Admin token 404 : No rule for /auth/realms/master/*
-                        : Fix: Added Priority 12 rule
-        Keycloak UI blank : Static assets not routed
-                          : Fix: Added /auth/* catch-all (Priority 99)
-    section Security
-        HTTPS required error : Keycloak enforces SSL on master
-                             : Fix: kcadm.sh disables sslRequired
-```
-
-| # | Issue | Root Cause | Fix |
-|---|-------|-----------|-----|
-| 1 | ECS tasks fail to start | Private subnets, no NAT Gateway | Public subnets + assignPublicIp=ENABLED |
-| 2 | CloudShell cannot reach private RDS | VPC isolation | SSM send-command routed through Denodo EC2 |
-| 3 | DB name mismatch | Custom DB names not created | Use default `postgres` database |
-| 4 | RDS password mismatch | Secrets Manager out of sync | `fix-opendata-password.sh` re-syncs |
-| 5 | SQL file too large for SSM | SSM parameter size limit | S3 bucket as intermediary |
-| 6 | Health check 502 | ALB health path wrong | Updated to `/auth/health/ready` |
-| 7 | Admin token 404 | No ALB rule for master realm | Added `/auth/realms/master/*` (Priority 12) |
-| 8 | Keycloak UI "Loading" | Static assets not forwarded | Added `/auth/*` catch-all (Priority 99) |
-| 9 | HTTPS required error | Default SSL policy | `kcadm.sh` disables sslRequired at startup |
-
----
-
-## 7. What Has Been Deployed (Complete)
+## 6. What Has Been Deployed (Complete)
 
 ```mermaid
 flowchart LR
@@ -420,7 +377,7 @@ flowchart LR
 
 ---
 
-## 8. What's Next -- Denodo Integration
+## 7. What's Next -- Denodo Integration
 
 **All AWS infrastructure is deployed and verified.** The next phase is Denodo platform configuration.
 
@@ -513,7 +470,7 @@ Create base views for: `/communes`, `/departements`, `/regions`
 
 ---
 
-## 9. Optional Improvements (Post-POC)
+## 8. Optional Improvements (Post-POC)
 
 ```mermaid
 flowchart LR
@@ -559,7 +516,7 @@ flowchart LR
 
 ---
 
-## 10. Access URLs and Credentials
+## 9. Access URLs and Credentials
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
@@ -573,7 +530,7 @@ flowchart LR
 
 ---
 
-## 11. Scripts Reference
+## 10. Scripts Reference
 
 | Script | Purpose | When to Run |
 |--------|---------|-------------|
@@ -592,7 +549,7 @@ flowchart LR
 
 ---
 
-## 12. Retrieving Secrets via CloudShell
+## 11. Retrieving Secrets via CloudShell
 
 All credentials are stored in AWS Secrets Manager. Use these commands from CloudShell.
 
