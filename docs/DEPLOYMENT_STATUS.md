@@ -11,9 +11,10 @@
 
 ```mermaid
 pie title "Deployment Completion (12 Feb 2026)"
-    "Deployed and Verified" : 92
-    "Remaining (Denodo Config)" : 8
+    "Infrastructure & Tests: COMPLETE" : 100
 ```
+
+**Status:** All 28 automated tests passed. Infrastructure is 100% operational and ready for Denodo platform integration.
 
 ---
 
@@ -386,118 +387,96 @@ All infrastructure and application components are deployed and operational.
 
 ---
 
-## 8. What Remains To Do
+## 8. What's Next -- Denodo Integration
+
+**All AWS infrastructure is deployed and verified.** The next phase is Denodo platform configuration.
+
+See **[NEXT_STEPS.md](./NEXT_STEPS.md)** for detailed instructions.
 
 ```mermaid
-flowchart TD
-    subgraph "REMAINING -- Denodo Platform Integration"
-        direction TB
-        D1["1. Run verify-all.sh\nFull automated test suite\n(CloudShell)"]
-        D2["2. Configure Denodo OIDC\nPoint to Consumer realm\nClient: denodo-consumer"]
-        D3["3. Configure Denodo\nRDS Data Source\nHost: denodo-poc-opendata-db..."]
-        D4["4. Configure Denodo\nREST API Data Source\ngeo.api.gouv.fr"]
-        D5["5. Create Denodo\nVirtual Views\nJoin RDS + API data"]
-        D6["6. End-to-End Test\nLogin via OIDC\nQuery data with permissions"]
+flowchart LR
+    subgraph "Phase 1: Denodo Configuration (Week 1)"
+        D1["1.1 Configure OIDC\nAuthentication"]
+        D2["1.2 Create RDS\nData Source"]
+        D3["1.3 Create REST API\nData Source"]
+        D4["1.4 Configure\nAuthorization API"]
+        D5["1.5 Create\nDerived Views"]
     end
 
-    D1 --> D2 --> D3 --> D4 --> D5 --> D6
+    subgraph "Phase 2: Testing (Week 1-2)"
+        T1["2.1 Test User\nScenarios"]
+        T2["2.2 Run Automated\nTest Suite"]
+    end
+
+    subgraph "Phase 3: Production Hardening (Week 2-3)"
+        P1["3.1 Add HTTPS\n(ACM)"]
+        P2["3.2 Add NAT\nGateway"]
+        P3["3.3 Add WAF"]
+        P4["3.4 Monitoring &\nAlerts"]
+    end
+
+    D1 --> D2 --> D3 --> D4 --> D5
+    D5 --> T1 --> T2
+    T2 --> P1 --> P2 --> P3 --> P4
 
     style D1 fill:#f39c12,color:#000
-    style D2 fill:#e74c3c,color:#fff
-    style D3 fill:#e74c3c,color:#fff
-    style D4 fill:#e74c3c,color:#fff
-    style D5 fill:#e74c3c,color:#fff
-    style D6 fill:#e74c3c,color:#fff
+    style D2 fill:#f39c12,color:#000
+    style D3 fill:#f39c12,color:#000
+    style D4 fill:#f39c12,color:#000
+    style D5 fill:#f39c12,color:#000
+    style T1 fill:#e74c3c,color:#fff
+    style T2 fill:#e74c3c,color:#fff
+    style P1 fill:#95a5a6,color:#fff
+    style P2 fill:#95a5a6,color:#fff
+    style P3 fill:#95a5a6,color:#fff
+    style P4 fill:#95a5a6,color:#fff
 ```
 
-### Step 1: Run Full Verification (CloudShell)
+### Quick Start: Phase 1 (Denodo Configuration)
 
-```bash
-chmod +x scripts/verify-all.sh
-./scripts/verify-all.sh
-```
+**Step 1: Configure OIDC Authentication**
 
-This tests all 6 areas: API Gateway, Keycloak UI, OIDC discovery, token grants, federation config, and RDS connectivity.
+In Denodo Admin Tool > Server Configuration > Authentication:
 
-### Step 2: Configure Denodo OIDC Authentication
+| Parameter | Value |
+|-----------|-------|
+| Issuer URL | `http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer` |
+| Client ID | `denodo-consumer` |
+| Client Secret | Get from Secrets Manager: `denodo-poc/keycloak/client-secret` |
+| Scopes | `openid email profile` |
 
-In Denodo Administration Tool, configure the OIDC authentication:
+**Step 2: Create RDS Data Source**
 
-```
-Server Configuration > Authentication > OAuth/OIDC
+| Parameter | Value |
+|-----------|-------|
+| Type | PostgreSQL (JDBC) |
+| Host | `denodo-poc-opendata-db.cacjdkje8yxa.eu-west-3.rds.amazonaws.com` |
+| Port | `5432` |
+| Database | `opendata` |
+| Schema | `opendata` |
+| User | `denodo` |
+| Password | Get from Secrets Manager: `denodo-poc/opendata/db` |
 
-Issuer URL:     http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer
-Client ID:      denodo-consumer
-Client Secret:  rNB8QkIanEKGEVirmdVuFmIXiAyM68VB
-Scopes:         openid email profile
-```
+Import tables: `entreprises`, `population_communes`, `entreprises_population`
 
-### Step 3: Configure Denodo RDS Data Source
+**Step 3: Create REST API Data Source**
 
-```
-New Data Source > JDBC
+| Parameter | Value |
+|-----------|-------|
+| Type | JSON/REST |
+| Base URL | `https://geo.api.gouv.fr` |
+| Auth | None (public) |
 
-Name:       DS_OPENDATA
-Type:       PostgreSQL
-Host:       denodo-poc-opendata-db.cacjdkje8yxa.eu-west-3.rds.amazonaws.com
-Port:       5432
-Database:   opendata
-Username:   denodo
-Password:   HRlE7nt5pRTFC4V8oj7p3fhPY
-```
+Create base views for: `/communes`, `/departements`, `/regions`
 
-Tables available:
-- `opendata.entreprises` (15,000+ French companies)
-- `opendata.population_communes` (36,000+ communes)
-- `opendata.entreprises_population` (view joining both)
+**Step 4: Test End-to-End**
 
-### Step 4: Configure Denodo REST API Data Source
+1. Login via OIDC (redirects to Keycloak)
+2. Enter `analyst@denodo.com` / `Analyst@2026!`
+3. Run query: `SELECT * FROM opendata.entreprises WHERE departement = '75' LIMIT 10`
+4. Verify row limit enforcement (10,000 rows for analyst)
 
-```
-New Data Source > JSON
-
-Name:       DS_GEO_API
-Base URL:   https://geo.api.gouv.fr
-Auth:       None (public API)
-
-Endpoints:
-  - /communes?codePostal={code}
-  - /departements/{code}
-  - /regions/{code}
-```
-
-### Step 5: Create Virtual Views
-
-Example cross-source query in Denodo:
-
-```sql
-SELECT
-    e.siren,
-    e.nom_raison_sociale,
-    e.code_postal,
-    e.ville,
-    g.nom AS commune_api,
-    g.population AS population_api,
-    p.population AS population_rds
-FROM DS_OPENDATA.opendata.entreprises e
-LEFT JOIN DS_GEO_API.communes g
-    ON e.code_postal = g.codesPostaux
-LEFT JOIN DS_OPENDATA.opendata.population_communes p
-    ON e.code_postal = p.code_postal
-WHERE e.departement = '75'
-ORDER BY g.population DESC
-LIMIT 100;
-```
-
-### Step 6: End-to-End Test
-
-1. Open Denodo web UI
-2. Login via OIDC (redirects to Keycloak Consumer realm)
-3. Click "Sign in with provider-idp"
-4. Enter `analyst@denodo.com` / `Analyst@2026!`
-5. Verify JWT claims include `profiles`, `datasources`
-6. Run a query on `DS_OPENDATA` -- should succeed (analyst has read access)
-7. Verify row limit enforcement (maxRowsPerQuery: 10,000 for analyst)
+**Detailed instructions:** See [NEXT_STEPS.md](./NEXT_STEPS.md)
 
 ---
 
