@@ -537,6 +537,15 @@ aws elbv2 create-rule \
     --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
     --region "$REGION" 2>&1 || log_warn "Health path rule already exists"
 
+# Rule 5: Catch-all /auth/* to Provider (JS/CSS/resources for admin UI)
+# This must be lowest priority so specific rules above take precedence
+aws elbv2 create-rule \
+    --listener-arn "$LISTENER_ARN" \
+    --priority 99 \
+    --conditions Field=path-pattern,Values='/auth/*' \
+    --actions Type=forward,TargetGroupArn="$PROVIDER_TG_ARN" \
+    --region "$REGION" 2>&1 || log_warn "Catch-all auth rule already exists"
+
 log_success "Path-based routing rules configured"
 
 ###############################################################################
