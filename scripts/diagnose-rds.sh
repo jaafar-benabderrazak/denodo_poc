@@ -163,6 +163,46 @@ if [ "${AWS_EXECUTION_ENV:-}" == "CloudShell" ] || [ "${CLOUDSHELL:-}" == "true"
   else
     log_info "psql available on Denodo EC2: $PSQL_CHECK_RESULT"
   fi
+
+  # Test network connectivity from Denodo EC2 to RDS
+  log_info "Testing network connectivity from Denodo EC2 to RDS endpoint..."
+  NETCAT_CMD_ID=$(aws ssm send-command \
+    --instance-ids "$DENODO_INSTANCE_ID" \
+    --document-name AWS-RunShellScript \
+    --parameters "commands=[\"timeout 5 bash -c '</dev/tcp/${OPENDATA_DB_ENDPOINT}/5432' 2>/dev/null && echo REACHABLE || echo UNREACHABLE\"]" \
+    --region "$REGION" \
+    --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+  if [ ! -z "$NETCAT_CMD_ID" ] && [ "$NETCAT_CMD_ID" != "None" ]; then
+    sleep 4
+    NETCAT_RESULT=$(aws ssm get-command-invocation \
+      --command-id "$NETCAT_CMD_ID" \
+      --instance-id "$DENODO_INSTANCE_ID" \
+      --region "$REGION" \
+      --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')
+
+    if [ "$NETCAT_RESULT" == "REACHABLE" ]; then
+      log_info "Network connectivity: RDS port 5432 is reachable from Denodo EC2"
+    else
+      log_error "Network connectivity: RDS port 5432 is NOT reachable from Denodo EC2"
+      log_error "This indicates a security group or network routing issue"
+      
+      # Get Denodo EC2 security groups
+      DENODO_SGS=$(aws ec2 describe-instances \
+        --instance-ids "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'Reservations[0].Instances[0].SecurityGroups[*].GroupId' \
+        --output text 2>/dev/null || echo "")
+      
+      # Get RDS security groups
+      RDS_SGS=$(echo "$RDS_INFO" | jq -r '.DBInstances[0].VpcSecurityGroups[].VpcSecurityGroupId' | tr '\n' ' ')
+      
+      log_warn "Denodo EC2 security groups: ${DENODO_SGS:-unknown}"
+      log_warn "RDS security groups: ${RDS_SGS:-unknown}"
+      log_warn "Check that RDS security group allows inbound 5432 from Denodo EC2 IP or SG"
+      echo ""
+    fi
+  fi
   echo ""
 fi
 
