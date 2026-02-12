@@ -14,10 +14,11 @@
 
 ```mermaid
 pie title "Deployment Completion (12 Feb 2026)"
-    "Infrastructure & Tests: COMPLETE" : 100
+    "Infrastructure & Tests: COMPLETE" : 70
+    "Denodo Configuration: PENDING" : 30
 ```
 
-**Status:** All 28 automated tests passed. Infrastructure is 100% operational and ready for Denodo platform integration.
+**Status:** All 28 automated tests passed. AWS infrastructure is 100% operational. **Next phase: Denodo platform configuration** (OIDC setup, data source integration, and authorization).
 
 ---
 
@@ -470,53 +471,7 @@ Create base views for: `/communes`, `/departements`, `/regions`
 
 ---
 
-## 8. Optional Improvements (Post-POC)
-
-```mermaid
-flowchart LR
-    subgraph "Production Hardening"
-        HTTPS["Add HTTPS\n(ACM Certificate)"]
-        NAT["Add NAT Gateway\n(Private ECS tasks)"]
-        WAF["Add WAF\n(ALB protection)"]
-    end
-
-    subgraph "Monitoring"
-        CW["CloudWatch\nDashboards"]
-        ALARM["CloudWatch\nAlarms"]
-        XRAY["X-Ray\nTracing"]
-    end
-
-    subgraph "Automation"
-        IaC["Terraform / CDK\nInfrastructure as Code"]
-        CICD["CI/CD Pipeline\nGitHub Actions"]
-        CLEANUP["Validate\ncleanup-all.sh"]
-    end
-
-    style HTTPS fill:#e74c3c,color:#fff
-    style NAT fill:#e67e22,color:#fff
-    style WAF fill:#e67e22,color:#fff
-    style CW fill:#f39c12,color:#000
-    style ALARM fill:#f39c12,color:#000
-    style XRAY fill:#f39c12,color:#000
-    style IaC fill:#95a5a6,color:#fff
-    style CICD fill:#95a5a6,color:#fff
-    style CLEANUP fill:#95a5a6,color:#fff
-```
-
-| Priority | Task | Description |
-|----------|------|-------------|
-| High | HTTPS (ACM) | Eliminates `sslRequired=NONE` workaround |
-| High | NAT Gateway | Move ECS to private subnets (security) |
-| Medium | WAF | Protect ALB from malicious traffic |
-| Medium | CloudWatch Dashboards | Centralized monitoring |
-| Medium | Alarms | Alert on unhealthy targets, 5xx errors |
-| Low | Terraform/CDK | Reproducible infrastructure |
-| Low | CI/CD | Automated deployment pipeline |
-| Low | Cleanup validation | Test `scripts/cleanup-all.sh` end-to-end |
-
----
-
-## 9. Access URLs and Credentials
+## 8. Access URLs and Credentials
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
@@ -530,7 +485,7 @@ flowchart LR
 
 ---
 
-## 10. Scripts Reference
+## 9. Scripts Reference
 
 | Script | Purpose | When to Run |
 |--------|---------|-------------|
@@ -549,7 +504,7 @@ flowchart LR
 
 ---
 
-## 11. Retrieving Secrets via CloudShell
+## 10. Retrieving Secrets via CloudShell
 
 All credentials are stored in AWS Secrets Manager. Use these commands from CloudShell.
 
