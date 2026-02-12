@@ -64,10 +64,24 @@ if [ "$API_COUNT" -gt 1 ]; then
   for API in $ALL_API_IDS; do
     if [ "$API" != "$KEEP_API" ]; then
       log_info "Deleting duplicate API: $API"
+      # Remove usage plan stage associations first
+      for UP_ID in $(aws apigateway get-usage-plans --region "$REGION" \
+        --query "items[?apiStages[?apiId=='$API']].id" --output text 2>/dev/null); do
+        aws apigateway update-usage-plan \
+          --usage-plan-id "$UP_ID" \
+          --patch-operations "op=remove,path=/apiStages,value=${API}:dev" \
+          --region "$REGION" 2>/dev/null || true
+      done
+      # Delete the stage
+      aws apigateway delete-stage \
+        --rest-api-id "$API" \
+        --stage-name dev \
+        --region "$REGION" 2>/dev/null || true
+      # Now delete the API
       aws apigateway delete-rest-api \
         --rest-api-id "$API" \
-        --region "$REGION" 2>/dev/null || log_warn "Could not delete API $API"
-      sleep 2  # Rate limiting
+        --region "$REGION" 2>/dev/null || log_warn "Could not delete API $API (may need manual cleanup)"
+      sleep 2
     fi
   done
   log_success "Duplicate APIs cleaned up"

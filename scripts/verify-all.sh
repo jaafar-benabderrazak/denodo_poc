@@ -75,18 +75,28 @@ if [ "$ALB_DNS" == "NOTFOUND" ] || [ -z "$ALB_DNS" ]; then
 fi
 echo -e "  ALB: ${CYAN}$ALB_DNS${NC}"
 
-# Find the API Gateway (exact name first, then pattern match, pick one)
-API_ID=$(aws apigateway get-rest-apis \
+# Find the API Gateway -- pick the one that has a working 'dev' stage
+ALL_API_IDS=$(aws apigateway get-rest-apis \
   --region "$REGION" \
-  --query "items[?name=='denodo-auth-api'].id | [0]" \
+  --query "items[?name=='denodo-auth-api'].id" \
   --output text 2>/dev/null || echo "")
 
-# Fallback: pick the last one matching 'denodo' if exact name not found
-if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
-  API_ID=$(aws apigateway get-rest-apis \
+API_ID=""
+for _ID in $ALL_API_IDS; do
+  # Check if this API has a 'dev' stage
+  _STAGE=$(aws apigateway get-stage \
+    --rest-api-id "$_ID" \
+    --stage-name dev \
     --region "$REGION" \
-    --query "items[?contains(name, 'denodo')].id | [-1]" \
-    --output text 2>/dev/null || echo "")
+    --query 'stageName' --output text 2>/dev/null || echo "NONE")
+  if [ "$_STAGE" == "dev" ]; then
+    API_ID="$_ID"
+  fi
+done
+
+# Fallback: just pick the last one
+if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
+  API_ID=$(echo "$ALL_API_IDS" | awk '{print $NF}')
 fi
 
 if [ ! -z "$API_ID" ] && [ "$API_ID" != "None" ]; then
