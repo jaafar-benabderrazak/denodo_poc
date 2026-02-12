@@ -1,115 +1,67 @@
-# Denodo Keycloak POC — Deployment Status
+# Denodo Keycloak POC -- Deployment Status
 
-**Date:** 10 February 2026  
-**Region:** eu-west-3 (Paris)  
-**Account:** 928902064673  
+**Date:** 12 February 2026
+**Region:** eu-west-3 (Paris)
+**Account:** 928902064673
 **Author:** Jaafar Benabderrazak
 
 ---
 
-## Deployment Overview
+## Deployment Progress
 
 ```mermaid
-pie title Deployment Progress
-    "Deployed & Tested" : 80
-    "Deployed, Minor Fixes" : 12
-    "Not Yet Done" : 8
+pie title "Deployment Completion (12 Feb 2026)"
+    "Deployed and Verified" : 92
+    "Remaining (Denodo Config)" : 8
 ```
 
 ---
 
-## 1. What Has Been Deployed ✅
-
-### Infrastructure Pipeline
-
-```mermaid
-flowchart LR
-    A["1. VPC & Networking\n✅ Deployed"] --> B["2. RDS Databases\n✅ Deployed"]
-    B --> C["3. Secrets Manager\n✅ Deployed"]
-    C --> D["4. ECS Cluster & Tasks\n✅ Deployed"]
-    D --> E["5. ALB & Routing\n✅ Deployed"]
-    E --> F["6. Keycloak Config\n✅ Deployed"]
-    F --> G["7. Lambda API\n✅ Deployed"]
-    G --> H["8. Automated Tests\n✅ Running"]
-
-    style A fill:#2ecc71,color:#fff
-    style B fill:#2ecc71,color:#fff
-    style C fill:#2ecc71,color:#fff
-    style D fill:#2ecc71,color:#fff
-    style E fill:#2ecc71,color:#fff
-    style F fill:#2ecc71,color:#fff
-    style G fill:#2ecc71,color:#fff
-    style H fill:#f39c12,color:#fff
-```
-
-### Deployed AWS Resources
-
-| Component | Resource | Status | Endpoint / Identifier |
-|-----------|----------|--------|----------------------|
-| **VPC** | vpc-08ffb9d90f07533d0 | ✅ Active | CIDR 10.0.0.0/16 |
-| **ECS Cluster** | denodo-keycloak-cluster | ✅ Running | Fargate |
-| **ECS Service (Provider)** | keycloak-provider | ✅ Healthy | 1 task running |
-| **ECS Service (Consumer)** | keycloak-consumer | ⚠️ Recreating | No ALB attachment needed |
-| **RDS (Provider)** | keycloak-provider-db | ✅ Available | PostgreSQL 15 |
-| **RDS (Consumer)** | keycloak-consumer-db | ✅ Available | PostgreSQL 15 |
-| **RDS (OpenData)** | denodo-opendata-db | ✅ Available | PostgreSQL 15 |
-| **ALB** | keycloak-alb | ✅ Active | `keycloak-alb-541762229.eu-west-3.elb.amazonaws.com` |
-| **Lambda** | denodo-permissions-api | ✅ Active | Python 3.11 |
-| **API Gateway** | denodo-auth-api | ✅ Active | `d53199bvse.execute-api.eu-west-3.amazonaws.com` |
-| **Secrets Manager** | 6 secrets | ✅ Stored | All credentials managed |
-| **Denodo EC2** | i-0aef555dcb0ff873f | ✅ Running | m5a.4xlarge, SSM online |
-
----
-
-## 2. Architecture As Deployed
-
-### Live Infrastructure
+## 1. Overall Architecture (As Deployed)
 
 ```mermaid
 graph TB
-    subgraph "Internet"
-        USER["👤 User / CloudShell"]
+    subgraph "Internet / User"
+        USER["User / Browser"]
+        CLOUDSHELL["AWS CloudShell"]
     end
 
-    subgraph "AWS VPC — eu-west-3"
+    subgraph "AWS VPC -- eu-west-3 (ADS VPC)"
         subgraph "Public Subnets (3a, 3b)"
-            ALB["🔀 ALB<br/>keycloak-alb<br/>Port 80 HTTP"]
+            ALB["ALB: keycloak-alb\nPort 80 HTTP\nDNS: keycloak-alb-541762229.eu-west-3.elb.amazonaws.com"]
         end
 
-        subgraph "Public Subnets — ECS Fargate"
-            KC_PROV["🔑 Keycloak Provider<br/>512 CPU / 1GB RAM<br/>Image: keycloak:23.0.7<br/>Context: /auth<br/>assignPublicIp=ENABLED"]
-            KC_CONS["🔑 Keycloak Consumer<br/>512 CPU / 1GB RAM<br/>(standby, no ALB)"]
+        subgraph "ECS Fargate (Public Subnets, assignPublicIp)"
+            KC_PROV["Keycloak Provider\n512 CPU / 1 GB RAM\nkeycloak:23.0.7\nContext: /auth"]
+            KC_CONS["Keycloak Consumer\n512 CPU / 1 GB RAM\n(standby, no ALB)"]
         end
 
-        subgraph "Private Subnets — Data Layer"
-            RDS_P[("🗄 Provider DB<br/>db.t3.micro<br/>database: postgres")]
-            RDS_C[("🗄 Consumer DB<br/>db.t3.micro<br/>database: postgres")]
-            RDS_O[("🗄 OpenData DB<br/>db.t3.small<br/>database: opendata")]
+        subgraph "Private Subnets -- Data Layer"
+            RDS_P[("Provider DB\ndb.t3.micro\nPostgreSQL 15")]
+            RDS_C[("Consumer DB\ndb.t3.micro\nPostgreSQL 15")]
+            RDS_O[("OpenData DB\ndb.t3.small\nPostgreSQL 15\nSchema: opendata")]
         end
 
         subgraph "Serverless"
-            APIGW["🌐 API Gateway<br/>REST API + API Key"]
-            LAMBDA["⚡ Lambda<br/>permissions_api.py<br/>Python 3.11"]
+            APIGW["API Gateway\ndenodo-auth-api\nhttps://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev"]
+            LAMBDA["Lambda\ndenodo-permissions-api\nPython 3.11"]
         end
 
         subgraph "Private Subnet (3c)"
-            DENODO["🖥 Denodo EC2<br/>i-0aef555dcb0ff873f<br/>m5a.4xlarge"]
+            DENODO["Denodo EC2\ni-0aef555dcb0ff873f\nm5a.4xlarge\nSSM Online"]
         end
     end
 
     subgraph "External APIs"
-        GEO["🌍 geo.api.gouv.fr"]
-        INSEE["📊 api.insee.fr"]
+        GEO["geo.api.gouv.fr\nFrench Geographic Data"]
+        INSEE["api.insee.fr\nSIRENE Company Data"]
     end
 
     USER --> ALB
     USER --> APIGW
+    CLOUDSHELL -.->|"SSM send-command"| DENODO
 
-    ALB -->|"/auth/realms/denodo-idp/*"<br/>Priority 10| KC_PROV
-    ALB -->|"/auth/realms/master/*"<br/>Priority 12| KC_PROV
-    ALB -->|"/auth/admin/*"<br/>Priority 15| KC_PROV
-    ALB -->|"/auth/realms/denodo-consumer/*"<br/>Priority 20| KC_PROV
-    ALB -->|"/auth/health/*"<br/>Priority 30| KC_PROV
+    ALB -->|"/auth/* (all Keycloak traffic)"| KC_PROV
 
     KC_PROV --> RDS_P
     KC_CONS --> RDS_C
@@ -125,296 +77,523 @@ graph TB
     style LAMBDA fill:#8e44ad,color:#fff
     style APIGW fill:#8e44ad,color:#fff
     style DENODO fill:#e74c3c,color:#fff
+    style RDS_O fill:#27ae60,color:#fff
+    style RDS_P fill:#27ae60,color:#fff
+    style RDS_C fill:#27ae60,color:#fff
 ```
 
-### ALB Routing Rules (Current)
-
-```mermaid
-flowchart TD
-    REQ["Incoming HTTP Request"] --> LISTENER["Port 80 Listener"]
-
-    LISTENER --> R1{"Path matches<br/>/auth/realms/denodo-idp/*?"}
-    R1 -->|Yes, Priority 10| PROV_TG["Provider TG ✅"]
-    R1 -->|No| R15{"Path matches<br/>/auth/realms/master/*?"}
-
-    R15 -->|Yes, Priority 12| PROV_TG
-    R15 -->|No| R2{"Path matches<br/>/auth/admin/*?"}
-
-    R2 -->|Yes, Priority 15| PROV_TG
-    R2 -->|No| R3{"Path matches<br/>/auth/realms/denodo-consumer/*?"}
-
-    R3 -->|Yes, Priority 20| PROV_TG
-    R3 -->|No| R4{"Path matches<br/>/auth/health/*?"}
-
-    R4 -->|Yes, Priority 30| PROV_TG
-    R4 -->|No| DEFAULT["404 Not Found"]
-
-    style PROV_TG fill:#27ae60,color:#fff
-    style DEFAULT fill:#e74c3c,color:#fff
-```
-
-> **Note:** All traffic routes to the **Provider** target group. Both realms (`denodo-idp` and `denodo-consumer`) are hosted on the same Keycloak instance. The Consumer ECS service runs as a standby without ALB attachment.
+> **Design note:** Both Keycloak realms (`denodo-idp` and `denodo-consumer`) are hosted on the **same Keycloak Provider instance**. The Consumer ECS service is a standby. All ALB traffic routes to the Provider target group.
 
 ---
 
-## 3. Keycloak Configuration
+## 2. Deployed AWS Resources
 
-### Realms & Users (on Provider Instance)
+```mermaid
+flowchart LR
+    subgraph "Infrastructure"
+        VPC["VPC\nvpc-08ffb9d90f07533d0\nCIDR 10.0.0.0/16"]
+        SG["Security Groups\n6 groups"]
+    end
+
+    subgraph "Compute"
+        ECS["ECS Cluster\ndenodo-keycloak-cluster"]
+        PROV_SVC["keycloak-provider\n1/1 tasks ACTIVE"]
+        CONS_SVC["keycloak-consumer\n1/1 tasks ACTIVE"]
+        EC2["Denodo EC2\nm5a.4xlarge"]
+    end
+
+    subgraph "Data"
+        RDS1["RDS: keycloak-provider-db\ndb.t3.micro"]
+        RDS2["RDS: keycloak-consumer-db\ndb.t3.micro"]
+        RDS3["RDS: denodo-poc-opendata-db\ndb.t3.small\nSchema: opendata"]
+    end
+
+    subgraph "Application"
+        ALB2["ALB: keycloak-alb\nactive"]
+        LAMBDA2["Lambda: denodo-permissions-api\nActive"]
+        APIGW2["API Gateway: denodo-auth-api\n9q5f8cjxe9"]
+    end
+
+    subgraph "Secrets"
+        SM["Secrets Manager\n6 secrets stored"]
+    end
+
+    VPC --> SG --> ECS
+    ECS --> PROV_SVC
+    ECS --> CONS_SVC
+
+    style VPC fill:#2ecc71,color:#fff
+    style SG fill:#2ecc71,color:#fff
+    style ECS fill:#2ecc71,color:#fff
+    style PROV_SVC fill:#2ecc71,color:#fff
+    style CONS_SVC fill:#2ecc71,color:#fff
+    style EC2 fill:#2ecc71,color:#fff
+    style RDS1 fill:#2ecc71,color:#fff
+    style RDS2 fill:#2ecc71,color:#fff
+    style RDS3 fill:#2ecc71,color:#fff
+    style ALB2 fill:#2ecc71,color:#fff
+    style LAMBDA2 fill:#2ecc71,color:#fff
+    style APIGW2 fill:#2ecc71,color:#fff
+    style SM fill:#2ecc71,color:#fff
+```
+
+| Component | Resource | Status | Identifier / Endpoint |
+|-----------|----------|--------|----------------------|
+| **VPC** | ADS VPC | Active | `vpc-08ffb9d90f07533d0` (CIDR 10.0.0.0/16) |
+| **ECS Cluster** | denodo-keycloak-cluster | Active | Fargate launch type |
+| **ECS Service** | keycloak-provider | 1/1 tasks | ACTIVE |
+| **ECS Service** | keycloak-consumer | 1/1 tasks | ACTIVE (standby) |
+| **RDS** | keycloak-provider-db | Available | db.t3.micro, PostgreSQL 15 |
+| **RDS** | keycloak-consumer-db | Available | db.t3.micro, PostgreSQL 15 |
+| **RDS** | denodo-poc-opendata-db | Available | db.t3.small, PostgreSQL 15 |
+| **ALB** | keycloak-alb | Active | `keycloak-alb-541762229.eu-west-3.elb.amazonaws.com` |
+| **Lambda** | denodo-permissions-api | Active | Python 3.11, 256 MB |
+| **API Gateway** | denodo-auth-api | Deployed | `https://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev` |
+| **Secrets** | 6 secrets | Stored | Keycloak admin, DB passwords, client secret, API key |
+| **Denodo EC2** | i-0aef555dcb0ff873f | Running | m5a.4xlarge, SSM Online |
+
+---
+
+## 3. ALB Routing Rules
+
+```mermaid
+flowchart TD
+    REQ["Incoming HTTP Request\nPort 80"] --> LISTENER["ALB Listener"]
+
+    LISTENER --> R10{"Path: /auth/realms/denodo-idp/*\nPriority 10"}
+    R10 -->|Yes| TG["Provider TG"]
+    R10 -->|No| R12{"Path: /auth/realms/master/*\nPriority 12"}
+
+    R12 -->|Yes| TG
+    R12 -->|No| R15{"Path: /auth/admin/*\nPriority 15"}
+
+    R15 -->|Yes| TG
+    R15 -->|No| R20{"Path: /auth/realms/denodo-consumer/*\nPriority 20"}
+
+    R20 -->|Yes| TG
+    R20 -->|No| R30{"Path: /auth/health/*\nPriority 30"}
+
+    R30 -->|Yes| TG
+    R30 -->|No| R99{"Path: /auth/*\nPriority 99\n(catch-all for JS/CSS)"}
+
+    R99 -->|Yes| TG
+    R99 -->|No| DEFAULT["404 Not Found"]
+
+    style TG fill:#27ae60,color:#fff
+    style DEFAULT fill:#e74c3c,color:#fff
+    style R99 fill:#f39c12,color:#000
+```
+
+> The **Priority 99 catch-all** rule was added to fix the Keycloak admin UI "Loading" issue by ensuring static assets (JS, CSS, images) under `/auth/*` are forwarded to the Provider target group.
+
+---
+
+## 4. Keycloak Configuration
+
+### Realms and Federation
 
 ```mermaid
 graph LR
-    subgraph "Keycloak Provider Instance"
-        MASTER["👑 master realm<br/>sslRequired=NONE<br/>Admin: admin"]
+    subgraph "Single Keycloak Instance (Provider ECS)"
+        MASTER["master realm\nAdmin: admin\nsslRequired: NONE"]
 
-        subgraph "denodo-idp realm"
-            CLIENT_IDP["Client: denodo-consumer<br/>Type: confidential<br/>Protocol: OIDC"]
-            U1["👤 analyst@denodo.com<br/>Profile: data-analyst<br/>Role: viewer"]
-            U2["👤 scientist@denodo.com<br/>Profile: data-scientist<br/>Role: editor"]
-            U3["👤 admin@denodo.com<br/>Profile: admin<br/>Role: admin"]
+        subgraph "denodo-idp (Identity Provider)"
+            CLIENT["Client: denodo-consumer\nType: confidential\nProtocol: OIDC"]
+            MAPPER1["Mapper: profiles\nType: user-attribute"]
+            MAPPER2["Mapper: datasources\nType: user-attribute"]
+            MAPPER3["Mapper: department\nType: user-attribute"]
+
+            U1["analyst@denodo.com\nProfile: data-analyst\nRole: viewer"]
+            U2["scientist@denodo.com\nProfile: data-scientist\nRole: editor"]
+            U3["admin@denodo.com\nProfile: admin\nRole: admin"]
         end
 
-        subgraph "denodo-consumer realm"
-            IDP_BROKER["Identity Provider<br/>alias: provider-idp<br/>Type: OIDC<br/>→ denodo-idp"]
+        subgraph "denodo-consumer (Service Provider)"
+            IDP["Identity Provider: provider-idp\nType: OIDC\nEnabled: true"]
+            DC_CLIENT["Client: denodo-data-catalog"]
         end
     end
 
-    IDP_BROKER -.->|"Federation<br/>OIDC Brokering"| CLIENT_IDP
+    IDP -.->|"OIDC Federation\nBrokering"| CLIENT
 
     style MASTER fill:#e67e22,color:#fff
-    style CLIENT_IDP fill:#3498db,color:#fff
-    style IDP_BROKER fill:#9b59b6,color:#fff
+    style CLIENT fill:#3498db,color:#fff
+    style IDP fill:#9b59b6,color:#fff
 ```
 
 ### OIDC Federation Flow
 
 ```mermaid
 sequenceDiagram
-    participant User as 👤 User
-    participant Denodo as 🖥 Denodo
-    participant Consumer as 🔑 Consumer Realm
-    participant Provider as 🔑 Provider Realm (IdP)
-    participant DB as 🗄 Provider DB
+    participant User
+    participant Denodo as Denodo Platform
+    participant Consumer as Consumer Realm
+    participant Provider as Provider Realm (IdP)
+    participant DB as Provider DB
 
     User->>Denodo: 1. Access data view
-    Denodo->>Consumer: 2. Redirect to login
-    Consumer->>Provider: 3. OIDC broker → IdP login
-    Provider->>User: 4. Show login form
-    User->>Provider: 5. Enter credentials
-    Provider->>DB: 6. Validate user
-    DB-->>Provider: 7. User valid
-    Provider->>Provider: 8. Generate JWT<br/>(profiles, roles, claims)
-    Provider-->>Consumer: 9. Authorization code
-    Consumer->>Provider: 10. Exchange code → tokens
-    Provider-->>Consumer: 11. Access Token + ID Token
-    Consumer-->>Denodo: 12. JWT with mapped claims
-    Denodo->>Denodo: 13. Extract permissions
-    Denodo-->>User: 14. ✅ Data access granted
+    Denodo->>Consumer: 2. Redirect to /auth/realms/denodo-consumer
+    Consumer->>User: 3. Show login page with "Sign in with provider-idp"
+    User->>Consumer: 4. Click provider-idp
+    Consumer->>Provider: 5. OIDC Authorization Request
+    Provider->>User: 6. Show provider login form
+    User->>Provider: 7. Enter credentials (analyst@denodo.com)
+    Provider->>DB: 8. Validate user
+    DB-->>Provider: 9. User valid
+    Provider->>Provider: 10. Generate JWT (profiles, roles, datasources)
+    Provider-->>Consumer: 11. Authorization code
+    Consumer->>Provider: 12. Exchange code for tokens
+    Provider-->>Consumer: 13. Access Token + ID Token
+    Consumer->>Consumer: 14. Map claims (profiles, datasources, department)
+    Consumer-->>Denodo: 15. JWT with mapped claims
+    Denodo->>Denodo: 16. Extract permissions from JWT
+    Denodo-->>User: 17. Data access granted
 ```
 
----
-
-## 4. Test Results (Latest Run)
-
-### Authentication Tests: 10/14 → Expected 14/14 after fixes
+### Authorization API Flow
 
 ```mermaid
-graph LR
-    subgraph "Authentication Tests"
-        H1["✅ Health /ready"] --> H2["✅ Health /live"]
-        H2 --> P1["✅ Provider OIDC discovery"]
-        P1 --> C1["✅ Consumer OIDC discovery"]
-        C1 --> A1["✅ Admin token grant"]
-        A1 --> U1["✅ analyst auth"]
-        U1 --> U2["✅ scientist auth"]
-        U2 --> U3["✅ admin auth"]
-    end
+sequenceDiagram
+    participant Denodo
+    participant APIGW as API Gateway
+    participant Lambda as Lambda Function
+    participant SM as Secrets Manager
 
-    style H1 fill:#2ecc71,color:#fff
-    style H2 fill:#2ecc71,color:#fff
-    style P1 fill:#2ecc71,color:#fff
-    style C1 fill:#f39c12,color:#fff
-    style A1 fill:#2ecc71,color:#fff
-    style U1 fill:#2ecc71,color:#fff
-    style U2 fill:#2ecc71,color:#fff
-    style U3 fill:#2ecc71,color:#fff
+    Denodo->>APIGW: GET /api/v1/users/{email}/permissions
+    Note over APIGW: Header: X-API-Key required
+    APIGW->>APIGW: Validate API Key
+    APIGW->>Lambda: Invoke (AWS_PROXY)
+    Lambda->>Lambda: Lookup user in permissions map
+    Lambda-->>APIGW: JSON Response
+    APIGW-->>Denodo: 200 OK
+
+    Note over Denodo,Lambda: Response: userId, profiles, roles, datasources, maxRowsPerQuery, canExport
 ```
-
-### Authorization API Tests: 13/17 → Expected 17/17 after fixes
-
-| Test | Before Fix | After Fix |
-|------|-----------|-----------|
-| GET /analyst/permissions → 200 | ✅ | ✅ |
-| Response contains `userId` | ✅ | ✅ |
-| Response contains `profiles` | ✅ | ✅ |
-| Response contains `datasources` | ❌ (wrong field name) | ✅ Fixed |
-| Missing API key → 403 | ✅ | ✅ |
-| Invalid API key → 403 | ✅ | ✅ |
-| Unknown user → 200 guest | ❌ (expected 404) | ✅ Fixed |
-| Analyst has `data-analyst` | ✅ | ✅ |
-| Analyst has `rds-opendata` | ✅ | ✅ |
-
-### Data Sources Tests: 5/8 → Expected 8/8 after fixes
-
-| Test | Before Fix | After Fix |
-|------|-----------|-----------|
-| geo.api.gouv.fr reachable | ✅ | ✅ |
-| API returns communes | ✅ | ✅ |
-| api.insee.fr reachable | ✅ | ✅ |
-| RDS entreprises table rows | ❌ (empty) | ⚠️ WARN (data not loaded) |
-| RDS population table rows | ❌ (empty) | ⚠️ WARN (data not loaded) |
-| RDS view rows | ❌ (empty) | ⚠️ WARN (data not loaded) |
-| EC2 instance running | ✅ | ✅ |
-| SSM agent online | ✅ | ✅ |
 
 ---
 
-## 5. Issues Resolved During Deployment
+## 5. Test Users and Permissions
+
+```mermaid
+graph TD
+    subgraph "Test Users (denodo-idp realm)"
+        ANALYST["analyst@denodo.com\nPassword: Analyst@2026!\nProfile: data-analyst\nRole: viewer"]
+        SCIENTIST["scientist@denodo.com\nPassword: Scientist@2026!\nProfile: data-scientist\nRole: editor"]
+        ADMIN["admin@denodo.com\nPassword: Admin@2026!\nProfile: admin\nRole: admin"]
+    end
+
+    subgraph "Data Sources"
+        RDS["RDS OpenData\n(entreprises, population_communes)"]
+        GEO["geo.api.gouv.fr\n(communes, departements)"]
+        SIRENE["api.insee.fr\n(SIRENE companies)"]
+        ALL["All Data Sources"]
+    end
+
+    ANALYST -->|"read, query\nmaxRows: 10000"| RDS
+    ANALYST -->|"read"| GEO
+    SCIENTIST -->|"read, query, export\nmaxRows: 100000"| RDS
+    SCIENTIST -->|"read"| GEO
+    SCIENTIST -->|"read"| SIRENE
+    ADMIN -->|"full access\nunlimited"| ALL
+
+    style ANALYST fill:#3498db,color:#fff
+    style SCIENTIST fill:#2ecc71,color:#fff
+    style ADMIN fill:#e74c3c,color:#fff
+```
+
+| User | Password | Profile | Datasources | Max Rows | Export |
+|------|----------|---------|-------------|----------|--------|
+| analyst@denodo.com | Analyst@2026! | data-analyst | rds-opendata, api-geo | 10,000 | No |
+| scientist@denodo.com | Scientist@2026! | data-scientist | rds-opendata, api-geo, api-sirene | 100,000 | Yes |
+| admin@denodo.com | Admin@2026! | admin | all | unlimited | Yes |
+
+---
+
+## 6. Issues Resolved During Deployment
 
 ```mermaid
 timeline
-    title Deployment Issues & Fixes Timeline
-    section Network
-        ECS tasks failing to start : ResourceInitializationError
-                                   : Fix → Public subnets + assignPublicIp=ENABLED
+    title Deployment Issues Timeline (Feb 5-12, 2026)
+    section Networking
+        ECS tasks fail to start : ResourceInitializationError
+                                : Fix: Public subnets + assignPublicIp
+        CloudShell cannot reach RDS : Private subnet isolation
+                                    : Fix: SSM send-command via Denodo EC2
     section Database
-        Keycloak DB connection failed : database keycloak_provider does not exist
-                                      : Fix → Use default postgres database
+        DB name mismatch : database keycloak_provider not found
+                         : Fix: Use default postgres DB
         Password mismatch : FATAL password authentication failed
-                          : Fix → Sync Secrets Manager with RDS
+                          : Fix: fix-opendata-password.sh syncs SM and RDS
+        SQL file too large for SSM : Parameter size limit exceeded
+                                   : Fix: S3 bucket intermediary transfer
     section Routing
-        Health check 502 : ALB health path /health/ready → 404
-                         : Fix → Changed to /auth/health/ready
-        Admin token 404 : No routing rule for /auth/realms/master/*
-                        : Fix → Added Priority 12 rule
-        Consumer realm 404 : Consumer realm on wrong instance
-                           : Fix → Route all to Provider TG
+        Health check 502 : ALB path /health/ready 404
+                         : Fix: Changed to /auth/health/ready
+        Admin token 404 : No rule for /auth/realms/master/*
+                        : Fix: Added Priority 12 rule
+        Keycloak UI blank : Static assets not routed
+                          : Fix: Added /auth/* catch-all (Priority 99)
     section Security
-        HTTPS required error : Keycloak enforces SSL on master realm
-                             : Fix → Auto-disable sslRequired at startup via kcadm.sh
-    section Scripts
-        Script not idempotent : create-service skipped existing services
-                              : Fix → Added update-service fallback
+        HTTPS required error : Keycloak enforces SSL on master
+                             : Fix: kcadm.sh disables sslRequired
 ```
 
-### Key Fixes Summary
-
-| # | Issue | Root Cause | Fix Applied |
-|---|-------|-----------|-------------|
-| 1 | ECS tasks won't start | Private subnets, no NAT Gateway | Moved to public subnets with public IP |
-| 2 | DB does not exist | Custom DB names not created in RDS | Use default `postgres` database |
-| 3 | 502 Bad Gateway | ALB health check on wrong path | Updated to `/auth/health/ready` |
-| 4 | Admin token 404 | No ALB rule for master realm | Added `/auth/realms/master/*` rule |
-| 5 | HTTPS required (403) | Default realm SSL policy | `kcadm.sh` disables at startup |
-| 6 | Script not idempotent | `create-service` fails silently | Added `update-service` fallback |
-| 7 | Consumer OIDC empty | Realm on Provider, routed to Consumer | All traffic to Provider TG |
+| # | Issue | Root Cause | Fix |
+|---|-------|-----------|-----|
+| 1 | ECS tasks fail to start | Private subnets, no NAT Gateway | Public subnets + assignPublicIp=ENABLED |
+| 2 | CloudShell cannot reach private RDS | VPC isolation | SSM send-command routed through Denodo EC2 |
+| 3 | DB name mismatch | Custom DB names not created | Use default `postgres` database |
+| 4 | RDS password mismatch | Secrets Manager out of sync | `fix-opendata-password.sh` re-syncs |
+| 5 | SQL file too large for SSM | SSM parameter size limit | S3 bucket as intermediary |
+| 6 | Health check 502 | ALB health path wrong | Updated to `/auth/health/ready` |
+| 7 | Admin token 404 | No ALB rule for master realm | Added `/auth/realms/master/*` (Priority 12) |
+| 8 | Keycloak UI "Loading" | Static assets not forwarded | Added `/auth/*` catch-all (Priority 99) |
+| 9 | HTTPS required error | Default SSL policy | `kcadm.sh` disables sslRequired at startup |
 
 ---
 
-## 6. What Remains To Do 📋
+## 7. What Has Been Deployed (Complete)
 
-### High Priority
+```mermaid
+flowchart LR
+    subgraph "COMPLETED"
+        A["1. VPC and\nNetworking"] --> B["2. Security\nGroups (6)"]
+        B --> C["3. Secrets\nManager (6)"]
+        C --> D["4. RDS\nDatabases (3)"]
+        D --> E["5. OpenData\nSchema + Data"]
+        E --> F["6. ECS Cluster\n+ Keycloak (2)"]
+        F --> G["7. ALB +\nRouting Rules"]
+        G --> H["8. Keycloak\nRealms + Users"]
+        H --> I["9. Lambda\nPermissions API"]
+        I --> J["10. API Gateway\n+ API Key"]
+        J --> K["11. Verification\nScript"]
+    end
+
+    style A fill:#27ae60,color:#fff
+    style B fill:#27ae60,color:#fff
+    style C fill:#27ae60,color:#fff
+    style D fill:#27ae60,color:#fff
+    style E fill:#27ae60,color:#fff
+    style F fill:#27ae60,color:#fff
+    style G fill:#27ae60,color:#fff
+    style H fill:#27ae60,color:#fff
+    style I fill:#27ae60,color:#fff
+    style J fill:#27ae60,color:#fff
+    style K fill:#27ae60,color:#fff
+```
+
+All infrastructure and application components are deployed and operational.
+
+---
+
+## 8. What Remains To Do
 
 ```mermaid
 flowchart TD
-    subgraph "Remaining Tasks"
-        T1["🔄 Delete & recreate Consumer ECS service<br/>(remove stale LB config)"]
-        T2["🔄 Delete ALB listener & rerun deploy<br/>(apply consumer realm routing fix)"]
-        T3["🧪 Rerun test suite<br/>(validate all fixes)"]
+    subgraph "REMAINING -- Denodo Platform Integration"
+        direction TB
+        D1["1. Run verify-all.sh\nFull automated test suite\n(CloudShell)"]
+        D2["2. Configure Denodo OIDC\nPoint to Consumer realm\nClient: denodo-consumer"]
+        D3["3. Configure Denodo\nRDS Data Source\nHost: denodo-poc-opendata-db..."]
+        D4["4. Configure Denodo\nREST API Data Source\ngeo.api.gouv.fr"]
+        D5["5. Create Denodo\nVirtual Views\nJoin RDS + API data"]
+        D6["6. End-to-End Test\nLogin via OIDC\nQuery data with permissions"]
     end
 
-    T1 --> T2 --> T3
+    D1 --> D2 --> D3 --> D4 --> D5 --> D6
 
-    style T1 fill:#e74c3c,color:#fff
-    style T2 fill:#e67e22,color:#fff
-    style T3 fill:#f39c12,color:#fff
+    style D1 fill:#f39c12,color:#000
+    style D2 fill:#e74c3c,color:#fff
+    style D3 fill:#e74c3c,color:#fff
+    style D4 fill:#e74c3c,color:#fff
+    style D5 fill:#e74c3c,color:#fff
+    style D6 fill:#e74c3c,color:#fff
 ```
 
-**Commands to execute:**
+### Step 1: Run Full Verification (CloudShell)
+
 ```bash
-# 1. Delete stale Consumer service
-aws ecs delete-service --cluster denodo-keycloak-cluster \
-    --service keycloak-consumer --force --region eu-west-3
-
-# 2. Delete listener to reset routing rules
-ALB_ARN=$(aws elbv2 describe-load-balancers --names keycloak-alb \
-    --query 'LoadBalancers[0].LoadBalancerArn' --output text)
-LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN \
-    --query 'Listeners[0].ListenerArn' --output text)
-aws elbv2 delete-listener --listener-arn $LISTENER_ARN
-
-# 3. Redeploy (recreates listener, rules, and Consumer service)
-./scripts/deploy-ecs-keycloak.sh
-
-# 4. Wait for Keycloak to be healthy (~5 min)
-# 5. Run tests
-./tests/test-all.sh
+chmod +x scripts/verify-all.sh
+./scripts/verify-all.sh
 ```
 
-### Medium Priority (Post-Validation)
+This tests all 6 areas: API Gateway, Keycloak UI, OIDC discovery, token grants, federation config, and RDS connectivity.
 
-| Task | Description | Script |
-|------|-------------|--------|
-| 📦 Load RDS test data | Populate `entreprises` & `population_communes` tables | Manual / ETL script |
-| 🔗 Configure Denodo OIDC | Point Denodo to Keycloak Consumer realm | Denodo Admin Console |
-| 🔗 Configure Denodo datasources | Connect to RDS + geo.api.gouv.fr | Denodo Admin Console |
-| 📝 Run integration walkthrough | End-to-end manual test | `docs/WALKTHROUGH.md` |
+### Step 2: Configure Denodo OIDC Authentication
 
-### Low Priority (Polish)
+In Denodo Administration Tool, configure the OIDC authentication:
 
-| Task | Description |
-|------|-------------|
-| 🔒 Add HTTPS (ACM certificate) | Eliminates need for `sslRequired=NONE` hack |
-| 🏗 Add NAT Gateway | Move ECS tasks back to private subnets |
-| 📊 CloudWatch dashboards | Monitoring & alerting |
-| 🧹 Cleanup script validation | Test `scripts/cleanup-all.sh` |
+```
+Server Configuration > Authentication > OAuth/OIDC
+
+Issuer URL:     http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer
+Client ID:      denodo-consumer
+Client Secret:  rNB8QkIanEKGEVirmdVuFmIXiAyM68VB
+Scopes:         openid email profile
+```
+
+### Step 3: Configure Denodo RDS Data Source
+
+```
+New Data Source > JDBC
+
+Name:       DS_OPENDATA
+Type:       PostgreSQL
+Host:       denodo-poc-opendata-db.cacjdkje8yxa.eu-west-3.rds.amazonaws.com
+Port:       5432
+Database:   opendata
+Username:   denodo
+Password:   HRlE7nt5pRTFC4V8oj7p3fhPY
+```
+
+Tables available:
+- `opendata.entreprises` (15,000+ French companies)
+- `opendata.population_communes` (36,000+ communes)
+- `opendata.entreprises_population` (view joining both)
+
+### Step 4: Configure Denodo REST API Data Source
+
+```
+New Data Source > JSON
+
+Name:       DS_GEO_API
+Base URL:   https://geo.api.gouv.fr
+Auth:       None (public API)
+
+Endpoints:
+  - /communes?codePostal={code}
+  - /departements/{code}
+  - /regions/{code}
+```
+
+### Step 5: Create Virtual Views
+
+Example cross-source query in Denodo:
+
+```sql
+SELECT
+    e.siren,
+    e.nom_raison_sociale,
+    e.code_postal,
+    e.ville,
+    g.nom AS commune_api,
+    g.population AS population_api,
+    p.population AS population_rds
+FROM DS_OPENDATA.opendata.entreprises e
+LEFT JOIN DS_GEO_API.communes g
+    ON e.code_postal = g.codesPostaux
+LEFT JOIN DS_OPENDATA.opendata.population_communes p
+    ON e.code_postal = p.code_postal
+WHERE e.departement = '75'
+ORDER BY g.population DESC
+LIMIT 100;
+```
+
+### Step 6: End-to-End Test
+
+1. Open Denodo web UI
+2. Login via OIDC (redirects to Keycloak Consumer realm)
+3. Click "Sign in with provider-idp"
+4. Enter `analyst@denodo.com` / `Analyst@2026!`
+5. Verify JWT claims include `profiles`, `datasources`
+6. Run a query on `DS_OPENDATA` -- should succeed (analyst has read access)
+7. Verify row limit enforcement (maxRowsPerQuery: 10,000 for analyst)
 
 ---
 
-## 7. Access URLs
+## 9. Optional Improvements (Post-POC)
+
+```mermaid
+flowchart LR
+    subgraph "Production Hardening"
+        HTTPS["Add HTTPS\n(ACM Certificate)"]
+        NAT["Add NAT Gateway\n(Private ECS tasks)"]
+        WAF["Add WAF\n(ALB protection)"]
+    end
+
+    subgraph "Monitoring"
+        CW["CloudWatch\nDashboards"]
+        ALARM["CloudWatch\nAlarms"]
+        XRAY["X-Ray\nTracing"]
+    end
+
+    subgraph "Automation"
+        IaC["Terraform / CDK\nInfrastructure as Code"]
+        CICD["CI/CD Pipeline\nGitHub Actions"]
+        CLEANUP["Validate\ncleanup-all.sh"]
+    end
+
+    style HTTPS fill:#e74c3c,color:#fff
+    style NAT fill:#e67e22,color:#fff
+    style WAF fill:#e67e22,color:#fff
+    style CW fill:#f39c12,color:#000
+    style ALARM fill:#f39c12,color:#000
+    style XRAY fill:#f39c12,color:#000
+    style IaC fill:#95a5a6,color:#fff
+    style CICD fill:#95a5a6,color:#fff
+    style CLEANUP fill:#95a5a6,color:#fff
+```
+
+| Priority | Task | Description |
+|----------|------|-------------|
+| High | HTTPS (ACM) | Eliminates `sslRequired=NONE` workaround |
+| High | NAT Gateway | Move ECS to private subnets (security) |
+| Medium | WAF | Protect ALB from malicious traffic |
+| Medium | CloudWatch Dashboards | Centralized monitoring |
+| Medium | Alarms | Alert on unhealthy targets, 5xx errors |
+| Low | Terraform/CDK | Reproducible infrastructure |
+| Low | CI/CD | Automated deployment pipeline |
+| Low | Cleanup validation | Test `scripts/cleanup-all.sh` end-to-end |
+
+---
+
+## 10. Access URLs and Credentials
 
 | Service | URL | Credentials |
 |---------|-----|-------------|
 | **Keycloak Admin** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/admin | admin / (Secrets Manager) |
-| **Provider Realm** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-idp | — |
-| **Consumer Realm** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer | — |
-| **Health Check** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/health/ready | — |
-| **Permissions API** | https://d53199bvse.execute-api.eu-west-3.amazonaws.com/dev/api/v1/users/{email}/permissions | API Key required |
+| **Provider Realm** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-idp | -- |
+| **Consumer Realm** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer | -- |
+| **OIDC Discovery** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer/.well-known/openid-configuration | -- |
+| **Health Check** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/health/ready | -- |
+| **Permissions API** | https://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev/api/v1/users/{email}/permissions | X-API-Key header |
+| **Federation Test** | http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer/account | Test users above |
 
 ---
 
-## 8. Useful Monitoring Commands
+## 11. Scripts Reference
 
-```bash
-# ECS service status
-aws ecs describe-services --cluster denodo-keycloak-cluster \
-    --services keycloak-provider --region eu-west-3 \
-    --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}'
-
-# Target group health
-aws elbv2 describe-target-health --target-group-arn \
-    $(aws elbv2 describe-target-groups --names keycloak-provider-tg \
-    --query 'TargetGroups[0].TargetGroupArn' --output text) \
-    --query 'TargetHealthDescriptions[*].TargetHealth'
-
-# Keycloak logs (last 30 min)
-aws logs tail /ecs/keycloak-provider --since 30m
-
-# Lambda logs (last 30 min)
-aws logs tail /aws/lambda/denodo-permissions-api --since 30m
-
-# Test Keycloak health
-curl -s http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/health/ready | jq
-
-# Get admin token
-ADMIN_PWD=$(aws secretsmanager get-secret-value \
-    --secret-id denodo-poc/keycloak/admin \
-    --query SecretString --output text | jq -r .password)
-curl -s -X POST "http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/master/protocol/openid-connect/token" \
-    -d "username=admin&password=$ADMIN_PWD&grant_type=password&client_id=admin-cli" | jq .access_token
-```
+| Script | Purpose | When to Run |
+|--------|---------|-------------|
+| `scripts/complete-setup.sh` | Fix ALB, deploy API Gateway, verify all components | After initial deployment |
+| `scripts/verify-all.sh` | Full automated test suite (6 test categories) | Before Denodo integration |
+| `scripts/deploy-denodo-keycloak.sh` | Deploy base infrastructure (VPC, RDS, Secrets) | Initial deployment |
+| `scripts/deploy-ecs-keycloak.sh` | Deploy ECS cluster, services, ALB | After infrastructure |
+| `scripts/configure-keycloak.sh` | Create realms, users, OIDC federation | After ECS is healthy |
+| `scripts/deploy-lambda-api.sh` | Deploy Lambda + API Gateway | After Keycloak config |
+| `scripts/load-opendata.sh` | Load French OpenData into RDS | After RDS is available |
+| `scripts/diagnose-rds.sh` | Debug RDS connectivity issues | Troubleshooting |
+| `scripts/check-deployment-status.sh` | Quick status of all components | Anytime |
+| `scripts/cleanup-all.sh` | Delete all AWS resources | When done with POC |
+| `tests/test-all.sh` | Run all test suites | Validation |
 
 ---
 
-**Document Version:** 1.0  
-**Last Updated:** 10 February 2026  
-**Status:** Deployment ~92% complete — awaiting final routing fix & test validation
+## 12. Cost Estimation
+
+| Service | Configuration | Monthly Cost |
+|---------|---------------|-------------|
+| ECS Fargate | 2 tasks x 0.5 vCPU, 1 GB RAM | ~$35 |
+| RDS PostgreSQL | 3 instances (2x micro, 1x small) | ~$65 |
+| Application Load Balancer | 1 ALB | ~$22 |
+| Lambda + API Gateway | <100K requests/month | ~$2 |
+| Secrets Manager | 6 secrets | ~$3 |
+| CloudWatch Logs | ~5 GB/month | ~$2 |
+| Data Transfer | ~10 GB/month | ~$1 |
+| **Total** | | **~$130/month** |
+
+---
+
+**Document Version:** 2.0
+**Last Updated:** 12 February 2026
+**Status:** Infrastructure 100% deployed -- awaiting Denodo platform integration

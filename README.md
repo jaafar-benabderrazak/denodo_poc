@@ -115,68 +115,61 @@ chmod +x scripts/*.sh
 | Lambda | denodo-permissions-api | Authorization API |
 | API Gateway | denodo-auth-api | REST API endpoint |
 
-### Post-Deployment
+### Post-Deployment: Complete Setup and Verify
 
-#### Access Keycloak Admin Consoles
+After deploying the base infrastructure, run the all-in-one setup and verification:
 
 ```bash
-# Get ALB DNS name
-ALB_DNS=$(aws elbv2 describe-load-balancers \
-  --names keycloak-alb \
-  --region eu-west-3 \
-  --query 'LoadBalancers[0].DNSName' \
-  --output text)
+# Fix ALB routing, deploy API Gateway, verify all components
+chmod +x scripts/*.sh
+./scripts/complete-setup.sh
 
-# Keycloak Provider Admin
-echo "http://$ALB_DNS/auth/admin/master/console/#/denodo-idp"
-
-# Keycloak Consumer Admin  
-echo "http://$ALB_DNS/auth/admin/master/console/#/denodo-consumer"
-
-# Admin credentials stored in Secrets Manager:
-aws secretsmanager get-secret-value \
-  --secret-id denodo-poc/keycloak/admin \
-  --region eu-west-3 \
-  --query SecretString \
-  --output text | jq -r '.password'
+# Run full automated test suite (6 categories)
+./scripts/verify-all.sh
 ```
 
-#### Test Users
+#### Access Keycloak Admin Console
 
-| Username | Password | Profile | Datasources |
-|----------|----------|---------|-------------|
-| analyst@denodo.com | Analyst@2026! | data-analyst | rds-opendata, api-geo |
-| scientist@denodo.com | Scientist@2026! | data-scientist | rds-opendata, api-geo, api-sirene |
-| admin@denodo.com | Admin@2026! | admin | all |
+```
+URL:      http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/admin
+Username: admin
+Password: (from Secrets Manager: denodo-poc/keycloak/admin)
+```
+
+#### Test Users (denodo-idp realm)
+
+| Username | Password | Profile | Datasources | Max Rows |
+|----------|----------|---------|-------------|----------|
+| analyst@denodo.com | Analyst@2026! | data-analyst | rds-opendata, api-geo | 10,000 |
+| scientist@denodo.com | Scientist@2026! | data-scientist | rds-opendata, api-geo, api-sirene | 100,000 |
+| admin@denodo.com | Admin@2026! | admin | all | unlimited |
 
 #### Test Authorization API
 
 ```bash
-# Get API endpoint
-API_ENDPOINT=$(cat deployment-info.json | jq -r '.apiGatewayEndpoint')
-API_KEY=$(aws secretsmanager get-secret-value \
-  --secret-id denodo-poc/api/auth-key \
-  --region eu-west-3 \
-  --query SecretString \
-  --output text | jq -r '.apiKey')
-
-# Test permissions lookup
-curl -H "X-API-Key: $API_KEY" \
-  "$API_ENDPOINT/api/v1/users/analyst@denodo.com/permissions"
+curl -H "X-API-Key: <API_KEY>" \
+  "https://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev/api/v1/users/analyst@denodo.com/permissions"
 ```
 
 #### Connect Denodo to Data Sources
 
+**OIDC Authentication:**
+```
+Issuer:        http://keycloak-alb-541762229.eu-west-3.elb.amazonaws.com/auth/realms/denodo-consumer
+Client ID:     denodo-consumer
+Client Secret: (from Secrets Manager: denodo-poc/keycloak/client-secret)
+Scopes:        openid email profile
+```
+
 **RDS OpenData Connection:**
-```sql
--- In Denodo Data Source configuration
-Type: PostgreSQL
-Host: <from deployment-info.json: rdsEndpoints.opendata>
-Port: 5432
+```
+Type:     PostgreSQL
+Host:     denodo-poc-opendata-db.cacjdkje8yxa.eu-west-3.rds.amazonaws.com
+Port:     5432
 Database: opendata
-Schema: opendata
+Schema:   opendata
 Username: denodo
-Password: <from Secrets Manager: denodo-poc/opendata/db>
+Password: (from Secrets Manager: denodo-poc/opendata/db)
 ```
 
 **Public API Connection:**
@@ -190,13 +183,14 @@ Authentication: None (public API)
 ### Testing
 
 ```bash
-# Run comprehensive tests
-./tests/test-all.sh
+# Full verification (API, Keycloak, OIDC, Federation, RDS)
+./scripts/verify-all.sh
 
-# Individual tests
-./tests/test-authentication.sh    # Test OIDC flow
-./tests/test-authorization.sh     # Test Lambda API
-./tests/test-data-sources.sh      # Test RDS and API connectivity
+# Individual test suites
+./tests/test-all.sh               # Orchestrated test runner
+./tests/test-authentication.sh    # OIDC token grants
+./tests/test-authorization.sh     # Lambda API permissions
+./tests/test-data-sources.sh      # RDS and API connectivity
 ```
 
 ### Monitoring
@@ -331,13 +325,15 @@ For issues or questions:
 
 ### Documentation
 
-- [Architecture Diagram](./docs/DENODO_KEYCLOAK_ARCHITECTURE.md)
+- [Deployment Status](./docs/DEPLOYMENT_STATUS.md) -- current status, what is deployed, what remains
+- [Architecture Diagram](./docs/DENODO_KEYCLOAK_ARCHITECTURE.md) -- full technical architecture
 - [Project Summary](./PROJECT_SUMMARY.md)
 - [Quick Reference](./QUICK_REFERENCE.md)
+- [Testing Guide](./TESTING_GUIDE.md)
 
 ---
 
-**Version:** 1.0  
-**Last Updated:** February 5, 2026  
-**Region:** eu-west-3 (Paris)  
+**Version:** 2.0
+**Last Updated:** 12 February 2026
+**Region:** eu-west-3 (Paris)
 **Maintainer:** Jaafar Benabderrazak
