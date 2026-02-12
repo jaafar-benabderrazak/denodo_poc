@@ -416,20 +416,7 @@ flowchart LR
     style K fill:#27ae60,color:#fff
 ```
 
-### As-Deployed vs. Original Architecture
-
-**All infrastructure and application components are deployed and operational.** However, several implementation decisions differ from the original architecture plan:
-
-| Aspect | Original Plan | As Deployed | Reason |
-|--------|--------------|-------------|---------|
-| **Keycloak Instances** | Two separate instances (Provider + Consumer) | Single instance hosts both realms | Simplified configuration, cost reduction |
-| **ECS Networking** | Private subnets with NAT Gateway | Public subnets with assignPublicIp | Avoid NAT Gateway costs ($45/month) |
-| **Database Names** | Custom databases (keycloak_provider, keycloak_consumer) | Default `postgres` database | RDS initialization issue |
-| **SSL/HTTPS** | HTTPS with ACM certificate | HTTP only (Port 80) | POC simplification, no ACM cert |
-| **Consumer Service** | Active, receives traffic | Standby only | Not needed with single-instance design |
-| **api-sirene Integration** | Fully configured | Referenced but not actively used | Focus on geo.api.gouv.fr first |
-
-These changes were made during deployment to resolve issues and reduce complexity/cost for the POC phase.
+**All infrastructure and application components are deployed and operational.**
 
 ---
 
