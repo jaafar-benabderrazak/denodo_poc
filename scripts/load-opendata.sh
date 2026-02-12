@@ -240,12 +240,21 @@ run_psql_file() {
 
   if [ "$USE_SSM" == "true" ]; then
     # For SSM mode, upload SQL file to S3, then download on EC2
-    log_info "Uploading SQL file to S3..."
     
     local S3_BUCKET="aws-cloudshell-$(aws sts get-caller-identity --query 'Account' --output text 2>/dev/null || echo 'temp')"
     local S3_KEY="denodo-poc-temp/$(date +%s)-$(basename "$sql_file")"
     local S3_URI="s3://${S3_BUCKET}/${S3_KEY}"
     
+    # Ensure bucket exists
+    if ! aws s3 ls "s3://${S3_BUCKET}" --region "$REGION" >/dev/null 2>&1; then
+      log_info "Creating S3 bucket for temporary files..."
+      aws s3 mb "s3://${S3_BUCKET}" --region "$REGION" 2>&1 || {
+        log_error "Failed to create S3 bucket"
+        return 1
+      }
+    fi
+    
+    log_info "Uploading SQL file to S3..."
     # Upload to S3
     aws s3 cp "$sql_file" "$S3_URI" --region "$REGION" 2>&1 || {
       log_error "Failed to upload SQL file to S3"
