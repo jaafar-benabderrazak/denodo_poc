@@ -71,7 +71,7 @@ if [ ! -f "$DEPLOYMENT_INFO" ]; then
   exit 1
 fi
 
-for tool in aws jq curl python3 psql; do
+for tool in aws jq curl python3; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     log_error "Missing required tool: $tool"
     log_error "Install it, then re-run this script."
@@ -79,9 +79,19 @@ for tool in aws jq curl python3 psql; do
   fi
 done
 
+# Check for local psql only if not using SSM
+if [ "${AWS_EXECUTION_ENV:-}" != "CloudShell" ] && [ "${CLOUDSHELL:-}" != "true" ]; then
+  if ! command -v psql >/dev/null 2>&1; then
+    log_error "Missing required tool: psql"
+    log_error "Install postgresql-client, then re-run this script."
+    exit 1
+  fi
+fi
+
 REGION=$(jq -r '.region' "$DEPLOYMENT_INFO")
 PROJECT_NAME=$(jq -r '.projectName' "$DEPLOYMENT_INFO")
 OPENDATA_DB_ENDPOINT=$(jq -r '.rdsEndpoints.opendata // empty' "$DEPLOYMENT_INFO")
+DENODO_INSTANCE_ID=$(jq -r '.denodo.instanceId // "i-0aef555dcb0ff873f"' "$DEPLOYMENT_INFO")
 
 if [ -z "$OPENDATA_DB_ENDPOINT" ] || [ "$OPENDATA_DB_ENDPOINT" == "null" ]; then
   log_error "OpenData RDS endpoint missing in deployment-info.json (.rdsEndpoints.opendata)"
@@ -104,41 +114,218 @@ if [ ! -f "$SQL_SCHEMA_FILE" ]; then
   exit 1
 fi
 
-export PGPASSWORD="$DB_PASSWORD"
+###############################################################################
+# Detect CloudShell and setup SSM routing
+###############################################################################
+USE_SSM="false"
+
+if [ "${AWS_EXECUTION_ENV:-}" == "CloudShell" ] || [ "${CLOUDSHELL:-}" == "true" ]; then
+  log_warn "Running in AWS CloudShell -- will route psql commands through Denodo EC2 via SSM"
+  USE_SSM="true"
+
+  # Verify SSM connectivity
+  SSM_STATUS=$(aws ssm describe-instance-information \
+    --filters "Key=InstanceIds,Values=${DENODO_INSTANCE_ID}" \
+    --region "$REGION" \
+    --query 'InstanceInformationList[0].PingStatus' \
+    --output text 2>/dev/null || echo "Unknown")
+
+  if [ "$SSM_STATUS" != "Online" ]; then
+    log_error "Denodo EC2 ($DENODO_INSTANCE_ID) SSM status: $SSM_STATUS (expected: Online)"
+    exit 1
+  fi
+  log_info "Denodo EC2 SSM: Online"
+
+  # Verify psql is available
+  PSQL_CHECK_CMD_ID=$(aws ssm send-command \
+    --instance-ids "$DENODO_INSTANCE_ID" \
+    --document-name AWS-RunShellScript \
+    --parameters 'commands=["which psql || echo MISSING"]' \
+    --region "$REGION" \
+    --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+  if [ ! -z "$PSQL_CHECK_CMD_ID" ]; then
+    sleep 3
+    PSQL_PATH=$(aws ssm get-command-invocation \
+      --command-id "$PSQL_CHECK_CMD_ID" \
+      --instance-id "$DENODO_INSTANCE_ID" \
+      --region "$REGION" \
+      --query 'StandardOutputContent' --output text 2>/dev/null | tr -d '[:space:]')
+
+    if [ "$PSQL_PATH" == "MISSING" ] || [ -z "$PSQL_PATH" ]; then
+      log_error "psql not found on Denodo EC2. Install postgresql client on the instance."
+      exit 1
+    fi
+  fi
+  log_info "psql available on Denodo EC2"
+  echo ""
+fi
+
+if [ "$USE_SSM" == "false" ]; then
+  export PGPASSWORD="$DB_PASSWORD"
+fi
+
+###############################################################################
+# Helper: run_psql -- execute psql command locally or via SSM
+###############################################################################
+run_psql() {
+  local db="$1"
+  shift
+
+  if [ "$USE_SSM" == "true" ]; then
+    # Build psql command for remote execution
+    local PSQL_CMD="PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_DB_ENDPOINT}' -U denodo -d '${db}' -p 5432"
+    for arg in "$@"; do
+      PSQL_CMD="$PSQL_CMD '$arg'"
+    done
+
+    local CMD_ID
+    CMD_ID=$(aws ssm send-command \
+      --instance-ids "$DENODO_INSTANCE_ID" \
+      --document-name AWS-RunShellScript \
+      --parameters "commands=[\"${PSQL_CMD}\"]" \
+      --region "$REGION" \
+      --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+    if [ -z "$CMD_ID" ] || [ "$CMD_ID" == "None" ]; then
+      return 1
+    fi
+
+    # Poll for completion
+    local WAIT_SECS=0
+    local CMD_STATUS="InProgress"
+    while [ "$CMD_STATUS" == "InProgress" ] || [ "$CMD_STATUS" == "Pending" ]; do
+      sleep 2
+      WAIT_SECS=$((WAIT_SECS + 2))
+      CMD_STATUS=$(aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'Status' --output text 2>/dev/null || echo "InProgress")
+      if [ "$WAIT_SECS" -ge 300 ]; then
+        log_warn "SSM command timed out after ${WAIT_SECS}s"
+        return 1
+      fi
+    done
+
+    if [ "$CMD_STATUS" == "Success" ]; then
+      aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'StandardOutputContent' --output text 2>/dev/null || true
+      return 0
+    else
+      aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'StandardErrorContent' --output text 2>/dev/null >&2 || true
+      return 1
+    fi
+  else
+    # Direct local psql
+    PGPASSWORD="$DB_PASSWORD" psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d "$db" -p 5432 "$@"
+  fi
+}
+
+###############################################################################
+# Helper: run_psql_file -- execute SQL file via psql (SSM transfers file)
+###############################################################################
+run_psql_file() {
+  local db="$1"
+  local sql_file="$2"
+  shift 2
+  local extra_args="$@"
+
+  if [ "$USE_SSM" == "true" ]; then
+    # Transfer SQL file to EC2 and execute it there
+    log_info "Transferring SQL file to Denodo EC2..."
+    
+    local REMOTE_TMP="/tmp/opendata-$(basename "$sql_file")"
+    local SQL_CONTENT=$(cat "$sql_file" | base64 -w 0 2>/dev/null || base64 "$sql_file")
+    
+    local TRANSFER_CMD="echo '${SQL_CONTENT}' | base64 -d > '${REMOTE_TMP}' && PGPASSWORD='${DB_PASSWORD}' psql -h '${OPENDATA_DB_ENDPOINT}' -U denodo -d '${db}' -p 5432 -f '${REMOTE_TMP}' ${extra_args} && rm -f '${REMOTE_TMP}'"
+    
+    local CMD_ID
+    CMD_ID=$(aws ssm send-command \
+      --instance-ids "$DENODO_INSTANCE_ID" \
+      --document-name AWS-RunShellScript \
+      --parameters "commands=[\"${TRANSFER_CMD}\"]" \
+      --region "$REGION" \
+      --query 'Command.CommandId' --output text 2>/dev/null || echo "")
+
+    if [ -z "$CMD_ID" ] || [ "$CMD_ID" == "None" ]; then
+      return 1
+    fi
+
+    # Poll for completion (allow up to 5 minutes for large SQL files)
+    local WAIT_SECS=0
+    local CMD_STATUS="InProgress"
+    while [ "$CMD_STATUS" == "InProgress" ] || [ "$CMD_STATUS" == "Pending" ]; do
+      sleep 3
+      WAIT_SECS=$((WAIT_SECS + 3))
+      CMD_STATUS=$(aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'Status' --output text 2>/dev/null || echo "InProgress")
+      if [ "$WAIT_SECS" -ge 300 ]; then
+        log_warn "SSM command timed out after ${WAIT_SECS}s"
+        return 1
+      fi
+    done
+
+    if [ "$CMD_STATUS" == "Success" ]; then
+      aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'StandardOutputContent' --output text 2>/dev/null || true
+      return 0
+    else
+      aws ssm get-command-invocation \
+        --command-id "$CMD_ID" \
+        --instance-id "$DENODO_INSTANCE_ID" \
+        --region "$REGION" \
+        --query 'StandardErrorContent' --output text 2>/dev/null >&2 || true
+      return 1
+    fi
+  else
+    # Direct local psql
+    PGPASSWORD="$DB_PASSWORD" psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d "$db" -p 5432 -f "$sql_file" $extra_args
+  fi
+}
 
 log_step "0" "Ensuring database 'opendata' exists"
 # Try connecting to opendata database directly
-if psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
+if run_psql "opendata" -c "SELECT 1;" >/dev/null 2>&1; then
   log_success "Database opendata is ready"
 else
   log_warn "Database 'opendata' not accessible; checking if it needs to be created"
   
   # Check what databases exist
-  EXISTING_DBS=$(psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d postgres -p 5432 -t -c "SELECT datname FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | xargs || echo "")
+  EXISTING_DBS=$(run_psql "postgres" -t -c "SELECT datname FROM pg_database WHERE datname = 'opendata';" 2>/dev/null | xargs || echo "")
   
   if [ -z "$EXISTING_DBS" ]; then
     log_info "Creating database 'opendata'..."
-    psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d postgres -p 5432 -c "CREATE DATABASE opendata;" 2>&1 || {
+    run_psql "postgres" -c "CREATE DATABASE opendata;" 2>&1 || {
       log_error "Failed to create database. Check permissions and RDS configuration."
-      log_info "Attempting to use existing 'postgres' database instead..."
-      # Note: This is a fallback - the schema creation might still work if we're already in the right DB
+      exit 1
     }
   fi
   
   # Verify connection again
-  if psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -c "SELECT 1;" >/dev/null 2>&1; then
+  if run_psql "opendata" -c "SELECT 1;" >/dev/null 2>&1; then
     log_success "Database opendata is ready"
   else
-    log_error "Cannot connect to database 'opendata'. The RDS instance might have been created with a different initial database name."
-    log_info "Checking RDS instance configuration..."
-    log_info "RDS Endpoint: $OPENDATA_DB_ENDPOINT"
-    log_info "Username: denodo"
+    log_error "Cannot connect to database 'opendata'."
     exit 1
   fi
 fi
 
 log_step "1" "Initializing OpenData schema"
-psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -f "$SQL_SCHEMA_FILE" >/dev/null
+run_psql_file "opendata" "$SQL_SCHEMA_FILE" "-q"
 log_success "Schema applied"
 
 log_step "2" "Downloading communes dataset from geo.api.gouv.fr"
@@ -212,20 +399,22 @@ echo "COMMIT;" >> "$INSERT_ENTREPRISES_SQL"
 log_success "SQL generated: $(basename "$INSERT_ENTREPRISES_SQL")"
 
 log_step "5" "Loading data into RDS (this may take a few minutes)"
-psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -f "$INSERT_COMMUNES_SQL" -q
-psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -f "$INSERT_ENTREPRISES_SQL" -q
+run_psql_file "opendata" "$INSERT_COMMUNES_SQL" "-q"
+run_psql_file "opendata" "$INSERT_ENTREPRISES_SQL" "-q"
 log_success "Data loaded"
 
 log_step "6" "Verifying counts"
-COMMUNE_DB_COUNT=$(psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -t -c "SELECT COUNT(*) FROM opendata.population_communes;" | xargs)
-ENTREPRISE_DB_COUNT=$(psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -t -c "SELECT COUNT(*) FROM opendata.entreprises;" | xargs)
-VIEW_DB_COUNT=$(psql -h "$OPENDATA_DB_ENDPOINT" -U denodo -d opendata -p 5432 -t -c "SELECT COUNT(*) FROM opendata.entreprises_population;" | xargs)
+COMMUNE_DB_COUNT=$(run_psql "opendata" -t -c "SELECT COUNT(*) FROM opendata.population_communes;" | xargs)
+ENTREPRISE_DB_COUNT=$(run_psql "opendata" -t -c "SELECT COUNT(*) FROM opendata.entreprises;" | xargs)
+VIEW_DB_COUNT=$(run_psql "opendata" -t -c "SELECT COUNT(*) FROM opendata.entreprises_population;" | xargs)
 
 log_success "population_communes: $COMMUNE_DB_COUNT"
 log_success "entreprises: $ENTREPRISE_DB_COUNT"
 log_success "entreprises_population view: $VIEW_DB_COUNT"
 
-unset PGPASSWORD
+if [ "$USE_SSM" == "false" ]; then
+  unset PGPASSWORD
+fi
 rm -rf "$TEMP_DIR"
 log_success "Temporary files cleaned up"
 
