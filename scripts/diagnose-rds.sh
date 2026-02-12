@@ -64,6 +64,7 @@ DB_NAME=$(echo "$DB_SECRET" | jq -r '.dbname // "postgres"')
 
 log_info "Username from secret: $DB_USER"
 log_info "Database name from secret: $DB_NAME"
+log_info "Password length: ${#DB_PASSWORD} characters"
 echo ""
 
 # Check RDS instance details to get the actual endpoint
@@ -301,7 +302,10 @@ if [ "$USE_SSM" == "false" ]; then
   export PGPASSWORD="$DB_PASSWORD"
 fi
 
-if run_psql "$DEFAULT_DB" -c "SELECT version();" >/dev/null 2>&1; then
+CONNECTION_TEST_OUTPUT=$(run_psql "$DEFAULT_DB" -c "SELECT version();" 2>&1)
+CONNECTION_TEST_EXIT=$?
+
+if [ $CONNECTION_TEST_EXIT -eq 0 ]; then
   log_info "Successfully connected to database: $DEFAULT_DB"
   
   # List all databases
@@ -365,8 +369,14 @@ else
   log_error "Cannot connect to database: $DEFAULT_DB"
   if [ "$USE_SSM" == "true" ]; then
     log_error "SSM command failed. Check that Denodo EC2 can reach RDS and credentials are correct."
+    echo ""
+    log_error "Connection error details:"
+    echo "$CONNECTION_TEST_OUTPUT" | head -10
   else
     log_error "Check network connectivity, security groups, and credentials"
+    echo ""
+    log_error "Connection error details:"
+    echo "$CONNECTION_TEST_OUTPUT" | head -10
   fi
 fi
 
