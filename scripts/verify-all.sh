@@ -75,20 +75,28 @@ if [ "$ALB_DNS" == "NOTFOUND" ] || [ -z "$ALB_DNS" ]; then
 fi
 echo -e "  ALB: ${CYAN}$ALB_DNS${NC}"
 
-# Find the API Gateway (search by name pattern)
+# Find the API Gateway (exact name first, then pattern match, pick one)
 API_ID=$(aws apigateway get-rest-apis \
   --region "$REGION" \
-  --query "items[?contains(name, 'denodo')].id" \
+  --query "items[?name=='denodo-auth-api'].id | [0]" \
   --output text 2>/dev/null || echo "")
 
+# Fallback: pick the last one matching 'denodo' if exact name not found
 if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
-  # Try v2 API
+  API_ID=$(aws apigateway get-rest-apis \
+    --region "$REGION" \
+    --query "items[?contains(name, 'denodo')].id | [-1]" \
+    --output text 2>/dev/null || echo "")
+fi
+
+if [ ! -z "$API_ID" ] && [ "$API_ID" != "None" ]; then
+  API_ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com/dev"
+else
+  # Try v2 HTTP API as last resort
   API_ENDPOINT=$(aws apigatewayv2 get-apis \
     --region "$REGION" \
-    --query "Items[?contains(Name, 'denodo')].ApiEndpoint" \
+    --query "Items[?contains(Name, 'denodo')].ApiEndpoint | [0]" \
     --output text 2>/dev/null || echo "")
-else
-  API_ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com/dev"
 fi
 
 echo -e "  API: ${CYAN}${API_ENDPOINT:-NOTFOUND}${NC}"

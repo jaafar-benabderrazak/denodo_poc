@@ -107,10 +107,19 @@ fi
 ###############################################################################
 log_phase "PHASE 2: DEPLOY API GATEWAY"
 
-API_ID=$(aws apigatewayv2 get-apis \
+# Check REST API (v1) first -- exact name match
+API_ID=$(aws apigateway get-rest-apis \
   --region "$REGION" \
-  --query "Items[?contains(Name, 'denodo')].ApiId" \
+  --query "items[?name=='denodo-auth-api'].id | [0]" \
   --output text 2>/dev/null || echo "")
+
+# Fallback: check HTTP API (v2)
+if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
+  API_ID=$(aws apigatewayv2 get-apis \
+    --region "$REGION" \
+    --query "Items[?contains(Name, 'denodo')].ApiId | [0]" \
+    --output text 2>/dev/null || echo "")
+fi
 
 if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
   log_info "API Gateway not found. Deploying..."
@@ -122,10 +131,7 @@ if [ -z "$API_ID" ] || [ "$API_ID" == "None" ]; then
     log_warn "deploy-lambda-api.sh not found, skipping API Gateway deployment"
   fi
 else
-  API_ENDPOINT=$(aws apigatewayv2 get-apis \
-    --region "$REGION" \
-    --query "Items[?contains(Name, 'denodo')].ApiEndpoint" \
-    --output text 2>/dev/null)
+  API_ENDPOINT="https://${API_ID}.execute-api.${REGION}.amazonaws.com/dev"
   log_success "API Gateway already deployed: $API_ENDPOINT"
 fi
 
@@ -256,11 +262,20 @@ if [ -f "$DEPLOYMENT_INFO" ]; then
 fi
 
 if [ -z "$API_ENDPOINT" ] || [ "$API_ENDPOINT" == "null" ]; then
-  # Try to find it from API Gateway
-  API_ENDPOINT=$(aws apigatewayv2 get-apis \
+  # Try REST API (v1) -- exact name, pick one
+  _API_ID=$(aws apigateway get-rest-apis \
     --region "$REGION" \
-    --query "Items[?contains(Name, 'denodo')].ApiEndpoint" \
+    --query "items[?name=='denodo-auth-api'].id | [0]" \
     --output text 2>/dev/null || echo "")
+  if [ ! -z "$_API_ID" ] && [ "$_API_ID" != "None" ]; then
+    API_ENDPOINT="https://${_API_ID}.execute-api.${REGION}.amazonaws.com/dev"
+  else
+    # Fallback to HTTP API (v2) -- pick first match
+    API_ENDPOINT=$(aws apigatewayv2 get-apis \
+      --region "$REGION" \
+      --query "Items[?contains(Name, 'denodo')].ApiEndpoint | [0]" \
+      --output text 2>/dev/null || echo "")
+  fi
 fi
 
 if [ ! -z "$API_ENDPOINT" ] && [ "$API_ENDPOINT" != "None" ]; then
