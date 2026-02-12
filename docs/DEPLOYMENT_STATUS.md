@@ -5,6 +5,9 @@
 **Account:** 928902064673
 **Author:** Jaafar Benabderrazak
 
+> **📋 Document Purpose:**
+> This document describes the **actual deployed architecture** of the Denodo Keycloak POC, including implementation decisions and workarounds made during deployment. Some aspects differ from the original architecture plan (see [DENODO_KEYCLOAK_ARCHITECTURE.md](./DENODO_KEYCLOAK_ARCHITECTURE.md)) due to deployment constraints, cost optimization, and POC simplification.
+
 ---
 
 ## Deployment Progress
@@ -29,46 +32,47 @@ graph TB
 
     subgraph "AWS VPC -- eu-west-3 (ADS VPC)"
         subgraph "Public Subnets (3a, 3b)"
-            ALB["ALB: keycloak-alb\nPort 80 HTTP\nDNS: keycloak-alb-541762229.eu-west-3.elb.amazonaws.com"]
+            ALB["ALB: keycloak-alb\nPort 80 HTTP Only\nDNS: keycloak-alb-541762229.eu-west-3.elb.amazonaws.com"]
         end
 
-        subgraph "ECS Fargate (Public Subnets, assignPublicIp)"
-            KC_PROV["Keycloak Provider\n512 CPU / 1 GB RAM\nkeycloak:23.0.7\nContext: /auth"]
-            KC_CONS["Keycloak Consumer\n512 CPU / 1 GB RAM\n(standby, no ALB)"]
+        subgraph "ECS Fargate (Public Subnets, assignPublicIp=ENABLED)"
+            KC_PROV["Keycloak Instance (ACTIVE)\n512 CPU / 1 GB RAM\nkeycloak:23.0.7\nHosts BOTH Realms:\n- master\n- denodo-idp (Provider)\n- denodo-consumer (Consumer)"]
+            KC_CONS["Keycloak Consumer Service\n512 CPU / 1 GB RAM\nSTANDBY - No ALB routing"]
         end
 
         subgraph "Private Subnets -- Data Layer"
-            RDS_P[("Provider DB\ndb.t3.micro\nPostgreSQL 15")]
-            RDS_C[("Consumer DB\ndb.t3.micro\nPostgreSQL 15")]
-            RDS_O[("OpenData DB\ndb.t3.small\nPostgreSQL 15\nSchema: opendata")]
+            RDS_P[("Provider DB\ndb.t3.micro\nPostgreSQL 15\nDatabase: postgres")]
+            RDS_C[("Consumer DB\ndb.t3.micro\nPostgreSQL 15\nDatabase: postgres")]
+            RDS_O[("OpenData DB\ndb.t3.small\nPostgreSQL 15\nDatabase: opendata\nSchema: opendata")]
         end
 
         subgraph "Serverless"
             APIGW["API Gateway\ndenodo-auth-api\nhttps://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev"]
-            LAMBDA["Lambda\ndenodo-permissions-api\nPython 3.11"]
+            LAMBDA["Lambda\ndenodo-permissions-api\nPython 3.11\n256 MB"]
         end
 
         subgraph "Private Subnet (3c)"
-            DENODO["Denodo EC2\ni-0aef555dcb0ff873f\nm5a.4xlarge\nSSM Online"]
+            DENODO["Denodo EC2\ni-0aef555dcb0ff873f\nm5a.4xlarge\nSSM Online\n10.0.75.195"]
         end
     end
 
-    subgraph "External APIs"
-        GEO["geo.api.gouv.fr\nFrench Geographic Data"]
-        INSEE["api.insee.fr\nSIRENE Company Data"]
+    subgraph "External Data Sources"
+        GEO["geo.api.gouv.fr\nFrench Geographic Data\nACTIVELY USED"]
+        SIRENE["entreprise.data.gouv.fr\nSIRENE Company Data\nOPTIONAL/NOT CONFIGURED"]
     end
 
     USER --> ALB
     USER --> APIGW
     CLOUDSHELL -.->|"SSM send-command"| DENODO
 
-    ALB -->|"/auth/* (all Keycloak traffic)"| KC_PROV
+    ALB -->|"ALL /auth/* traffic"| KC_PROV
+    ALB -.->|"NO TRAFFIC"| KC_CONS
 
-    KC_PROV --> RDS_P
-    KC_CONS --> RDS_C
-    DENODO --> RDS_O
-    DENODO --> GEO
-    DENODO -.-> INSEE
+    KC_PROV -->|"JDBC Connection"| RDS_P
+    KC_CONS -->|"Not in use"| RDS_C
+    DENODO -->|"PostgreSQL queries"| RDS_O
+    DENODO -->|"REST API calls"| GEO
+    DENODO -.->|"Future integration"| SIRENE
 
     APIGW --> LAMBDA
 
@@ -80,10 +84,18 @@ graph TB
     style DENODO fill:#e74c3c,color:#fff
     style RDS_O fill:#27ae60,color:#fff
     style RDS_P fill:#27ae60,color:#fff
-    style RDS_C fill:#27ae60,color:#fff
+    style RDS_C fill:#95a5a6,color:#fff
+    style GEO fill:#f39c12,color:#000
+    style SIRENE fill:#95a5a6,color:#fff
 ```
 
-> **Design note:** Both Keycloak realms (`denodo-idp` and `denodo-consumer`) are hosted on the **same Keycloak Provider instance**. The Consumer ECS service is a standby. All ALB traffic routes to the Provider target group.
+> **Important Deployment Details:**
+> - **Single Keycloak Instance:** Both realms (`denodo-idp` and `denodo-consumer`) run on the same Keycloak Provider ECS task
+> - **ALB Routing:** ALL traffic routes to Provider target group; Consumer service is standby only
+> - **Network Configuration:** ECS tasks deployed in PUBLIC subnets with assignPublicIp=ENABLED (no NAT Gateway)
+> - **Protocol:** HTTP only (Port 80), sslRequired=NONE due to no ACM certificate
+> - **Database Names:** Using default `postgres` database (not custom database names)
+> - **OIDC Federation:** Internal federation between denodo-consumer realm → denodo-idp realm on same instance
 
 ---
 
@@ -138,20 +150,20 @@ flowchart LR
     style SM fill:#2ecc71,color:#fff
 ```
 
-| Component | Resource | Status | Identifier / Endpoint |
-|-----------|----------|--------|----------------------|
-| **VPC** | ADS VPC | Active | `vpc-08ffb9d90f07533d0` (CIDR 10.0.0.0/16) |
-| **ECS Cluster** | denodo-keycloak-cluster | Active | Fargate launch type |
-| **ECS Service** | keycloak-provider | 1/1 tasks | ACTIVE |
-| **ECS Service** | keycloak-consumer | 1/1 tasks | ACTIVE (standby) |
-| **RDS** | keycloak-provider-db | Available | db.t3.micro, PostgreSQL 15 |
-| **RDS** | keycloak-consumer-db | Available | db.t3.micro, PostgreSQL 15 |
-| **RDS** | denodo-poc-opendata-db | Available | db.t3.small, PostgreSQL 15 |
-| **ALB** | keycloak-alb | Active | `keycloak-alb-541762229.eu-west-3.elb.amazonaws.com` |
-| **Lambda** | denodo-permissions-api | Active | Python 3.11, 256 MB |
-| **API Gateway** | denodo-auth-api | Deployed | `https://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev` |
-| **Secrets** | 6 secrets | Stored | Keycloak admin, DB passwords, client secret, API key |
-| **Denodo EC2** | i-0aef555dcb0ff873f | Running | m5a.4xlarge, SSM Online |
+| Component | Resource | Status | Identifier / Endpoint | Notes |
+|-----------|----------|--------|----------------------|-------|
+| **VPC** | ADS VPC | Active | `vpc-08ffb9d90f07533d0` (CIDR 10.0.0.0/16) | Existing VPC |
+| **ECS Cluster** | denodo-keycloak-cluster | Active | Fargate launch type | 2 services |
+| **ECS Service** | keycloak-provider | 1/1 tasks | ACTIVE | Hosts all 3 Keycloak realms, receives ALL ALB traffic |
+| **ECS Service** | keycloak-consumer | 1/1 tasks | STANDBY | Running but not receiving traffic |
+| **RDS** | keycloak-provider-db | Available | db.t3.micro, PostgreSQL 15 | Database: `postgres` (not custom name) |
+| **RDS** | keycloak-consumer-db | Available | db.t3.micro, PostgreSQL 15 | Database: `postgres`, not actively used |
+| **RDS** | denodo-poc-opendata-db | Available | db.t3.small, PostgreSQL 15 | Database: `opendata`, Schema: `opendata` |
+| **ALB** | keycloak-alb | Active | `keycloak-alb-541762229.eu-west-3.elb.amazonaws.com` | HTTP only (Port 80), no HTTPS |
+| **Lambda** | denodo-permissions-api | Active | Python 3.11, 256 MB | Role-based access control API |
+| **API Gateway** | denodo-auth-api | Deployed | `https://9q5f8cjxe9.execute-api.eu-west-3.amazonaws.com/dev` | Requires X-API-Key header |
+| **Secrets** | 6 secrets | Stored | Keycloak admin, DB passwords, client secret, API key | All in Secrets Manager |
+| **Denodo EC2** | i-0aef555dcb0ff873f | Running | m5a.4xlarge, SSM Online, 10.0.75.195 | Used for RDS access via SSM |
 
 ---
 
@@ -194,33 +206,52 @@ flowchart TD
 ### Realms and Federation
 
 ```mermaid
-graph LR
-    subgraph "Single Keycloak Instance (Provider ECS)"
-        MASTER["master realm\nAdmin: admin\nsslRequired: NONE"]
-
-        subgraph "denodo-idp (Identity Provider)"
-            CLIENT["Client: denodo-consumer\nType: confidential\nProtocol: OIDC"]
-            MAPPER1["Mapper: profiles\nType: user-attribute"]
-            MAPPER2["Mapper: datasources\nType: user-attribute"]
-            MAPPER3["Mapper: department\nType: user-attribute"]
-
-            U1["analyst@denodo.com\nProfile: data-analyst\nRole: viewer"]
-            U2["scientist@denodo.com\nProfile: data-scientist\nRole: editor"]
-            U3["admin@denodo.com\nProfile: admin\nRole: admin"]
+graph TB
+    subgraph "Single Keycloak Instance (Provider ECS Service)"
+        subgraph "master realm"
+            MASTER["Admin Console\nUsername: admin\nsslRequired: NONE\nPort: 8080"]
         end
 
-        subgraph "denodo-consumer (Service Provider)"
-            IDP["Identity Provider: provider-idp\nType: OIDC\nEnabled: true"]
-            DC_CLIENT["Client: denodo-data-catalog"]
+        subgraph "denodo-idp realm (Identity Provider)"
+            CLIENT["OIDC Client: denodo-consumer\nType: confidential\nProtocol: openid-connect\nSecret: stored in Secrets Manager"]
+
+            subgraph "User Attributes & Mappers"
+                MAPPER1["profiles mapper\n→ JWT claim: profiles"]
+                MAPPER2["datasources mapper\n→ JWT claim: datasources"]
+                MAPPER3["department mapper\n→ JWT claim: department"]
+            end
+
+            subgraph "Test Users"
+                U1["analyst@denodo.com\nPassword: Analyst@2026!\nAttributes:\n- profiles: data-analyst\n- datasources: rds-opendata, api-geo\n- department: Analytics"]
+                U2["scientist@denodo.com\nPassword: Scientist@2026!\nAttributes:\n- profiles: data-scientist\n- datasources: rds-opendata, api-geo, api-sirene\n- department: Research"]
+                U3["admin@denodo.com\nPassword: Admin@2026!\nAttributes:\n- profiles: admin\n- datasources: *\n- department: IT"]
+            end
+        end
+
+        subgraph "denodo-consumer realm (Service Provider)"
+            IDP["Identity Provider Config: provider-idp\nType: OIDC\nEnabled: true\nInternal Brokering"]
+            DC_CLIENT["Client: denodo-data-catalog\n(for Denodo platform)"]
         end
     end
 
-    IDP -.->|"OIDC Federation\nBrokering"| CLIENT
+    IDP -.->|"OIDC Federation Flow\n(internal to same instance)"| CLIENT
+    DC_CLIENT -->|"Uses for authentication"| IDP
 
     style MASTER fill:#e67e22,color:#fff
     style CLIENT fill:#3498db,color:#fff
     style IDP fill:#9b59b6,color:#fff
+    style DC_CLIENT fill:#2ecc71,color:#fff
+    style U1 fill:#ecf0f1,color:#000
+    style U2 fill:#ecf0f1,color:#000
+    style U3 fill:#ecf0f1,color:#000
 ```
+
+> **Key Configuration Details:**
+> - All three realms (master, denodo-idp, denodo-consumer) run on a **single Keycloak instance**
+> - The federation is **internal**: consumer realm → provider realm on same server
+> - JWT tokens include custom claims (profiles, datasources, department) via attribute mappers
+> - HTTP only (Port 80) - sslRequired disabled on all realms for POC
+> - Consumer ECS service exists but is not used (all traffic goes to Provider service)
 
 ### OIDC Federation Flow
 
@@ -302,11 +333,13 @@ graph TD
     style ADMIN fill:#e74c3c,color:#fff
 ```
 
-| User | Password | Profile | Datasources | Max Rows | Export |
-|------|----------|---------|-------------|----------|--------|
-| analyst@denodo.com | Analyst@2026! | data-analyst | rds-opendata, api-geo | 10,000 | No |
-| scientist@denodo.com | Scientist@2026! | data-scientist | rds-opendata, api-geo, api-sirene | 100,000 | Yes |
-| admin@denodo.com | Admin@2026! | admin | all | unlimited | Yes |
+| User | Password | Profile | Datasources | Max Rows | Export | Notes |
+|------|----------|---------|-------------|----------|--------|-------|
+| analyst@denodo.com | Analyst@2026! | data-analyst | rds-opendata, api-geo | 10,000 | No | Read-only access |
+| scientist@denodo.com | Scientist@2026! | data-scientist | rds-opendata, api-geo | 100,000 | Yes | Advanced access, export enabled |
+| admin@denodo.com | Admin@2026! | admin | all (*) | unlimited | Yes | Full administrative access |
+
+> **Note:** While the scientist user's attributes may reference `api-sirene`, this datasource is **not actively configured** in the current deployment. The POC focuses on `rds-opendata` and `api-geo` (geo.api.gouv.fr) as the primary data sources.
 
 ---
 
@@ -357,17 +390,17 @@ timeline
 
 ```mermaid
 flowchart LR
-    subgraph "COMPLETED"
-        A["1. VPC and\nNetworking"] --> B["2. Security\nGroups (6)"]
+    subgraph "COMPLETED (As-Deployed Configuration)"
+        A["1. VPC and\nNetworking\n(Existing VPC)"] --> B["2. Security\nGroups (6)"]
         B --> C["3. Secrets\nManager (6)"]
-        C --> D["4. RDS\nDatabases (3)"]
-        D --> E["5. OpenData\nSchema + Data"]
-        E --> F["6. ECS Cluster\n+ Keycloak (2)"]
-        F --> G["7. ALB +\nRouting Rules"]
-        G --> H["8. Keycloak\nRealms + Users"]
+        C --> D["4. RDS\nDatabases (3)\nDefault postgres DB"]
+        D --> E["5. OpenData\nSchema + Data\n15K companies"]
+        E --> F["6. ECS Cluster\n+ Single Keycloak\n(Provider Active)"]
+        F --> G["7. ALB +\nRouting Rules\nHTTP Only"]
+        G --> H["8. Keycloak\n3 Realms + Users\n(Same Instance)"]
         H --> I["9. Lambda\nPermissions API"]
         I --> J["10. API Gateway\n+ API Key"]
-        J --> K["11. Verification\nScript"]
+        J --> K["11. Verification\nScript\n28 Tests Pass"]
     end
 
     style A fill:#27ae60,color:#fff
@@ -383,7 +416,7 @@ flowchart LR
     style K fill:#27ae60,color:#fff
 ```
 
-All infrastructure and application components are deployed and operational.
+**All infrastructure and application components are deployed and operational.**
 
 ---
 
