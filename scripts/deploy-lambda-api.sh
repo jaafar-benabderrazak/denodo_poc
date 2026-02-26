@@ -215,11 +215,12 @@ log_phase "PHASE 4: CREATING API GATEWAY"
 log_step "4.1" "Creating REST API"
 
 # Reuse existing API Gateway if one exists, otherwise create new
+# Use [0] to pick the first match if duplicates exist
 API_ID=$(aws apigateway get-rest-apis \
     --region "$REGION" \
-    --query "items[?name=='${API_NAME}'].id" --output text 2>/dev/null)
+    --query "items[?name=='${API_NAME}'].id | [0]" --output text 2>/dev/null)
 
-if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
+if [ -z "$API_ID" ] || [ "$API_ID" = "None" ] || [ "$API_ID" = "null" ]; then
     API_ID=$(aws apigateway create-rest-api \
         --name "$API_NAME" \
         --description "Denodo POC Authorization API" \
@@ -229,6 +230,16 @@ if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
         --query 'id' --output text)
     log_success "API Gateway created: $API_ID"
 else
+    # Clean up duplicate API Gateways (keep only the first)
+    DUPLICATE_IDS=$(aws apigateway get-rest-apis \
+        --region "$REGION" \
+        --query "items[?name=='${API_NAME}'].id" --output text 2>/dev/null)
+    for DUP_ID in $DUPLICATE_IDS; do
+        if [ "$DUP_ID" != "$API_ID" ]; then
+            log_warn "Deleting duplicate API Gateway: $DUP_ID"
+            aws apigateway delete-rest-api --rest-api-id "$DUP_ID" --region "$REGION" 2>/dev/null || true
+        fi
+    done
     log_info "Reusing existing API Gateway: $API_ID"
 fi
 
