@@ -313,6 +313,7 @@ For issues or questions:
 ### Documentation
 
 - **[Next Steps](./docs/NEXT_STEPS.md)** -- complete guide for Denodo integration, production hardening, timeline
+- **[Test Results Analysis](./docs/TEST_RESULTS_ANALYSIS.md)** -- annotated test output with Mermaid diagrams, JWT analysis, permission model
 - [Deployment Status](./docs/DEPLOYMENT_STATUS.md) -- current status, what is deployed, what remains
 - [Showcase Scenarios](./docs/SHOWCASE_SCENARIOS.md) -- 10 step-by-step demo scenarios with Mermaid diagrams
 - [Architecture Diagram](./docs/DENODO_KEYCLOAK_ARCHITECTURE.md) -- full technical architecture
