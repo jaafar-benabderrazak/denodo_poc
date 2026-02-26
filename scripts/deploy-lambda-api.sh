@@ -358,15 +358,21 @@ log_success "CORS support configured"
 
 log_step "4.5" "Granting API Gateway permission to invoke Lambda"
 
+# Remove stale permission first (may point to old API Gateway ID), then re-add
+aws lambda remove-permission \
+    --function-name "$LAMBDA_FUNCTION_NAME" \
+    --statement-id apigateway-invoke \
+    --region "$REGION" 2>/dev/null || true
+
 aws lambda add-permission \
     --function-name "$LAMBDA_FUNCTION_NAME" \
     --statement-id apigateway-invoke \
     --action lambda:InvokeFunction \
     --principal apigateway.amazonaws.com \
     --source-arn "arn:aws:execute-api:${REGION}:${ACCOUNT_ID}:${API_ID}/*" \
-    --region "$REGION" 2>&1 || log_warn "Lambda permission already exists"
+    --region "$REGION" 2>&1
 
-log_success "Lambda invoke permission granted"
+log_success "Lambda invoke permission granted (API ID: ${API_ID})"
 
 log_step "4.6" "Creating API key and usage plan"
 
