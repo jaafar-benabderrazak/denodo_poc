@@ -214,16 +214,23 @@ log_phase "PHASE 4: CREATING API GATEWAY"
 
 log_step "4.1" "Creating REST API"
 
-API_ID=$(aws apigateway create-rest-api \
-    --name "$API_NAME" \
-    --description "Denodo POC Authorization API" \
-    --endpoint-configuration types=REGIONAL \
-    --tags Project="$PROJECT_NAME" \
+# Reuse existing API Gateway if one exists, otherwise create new
+API_ID=$(aws apigateway get-rest-apis \
     --region "$REGION" \
-    --query 'id' --output text 2>/dev/null || \
-    aws apigateway get-rest-apis \
+    --query "items[?name=='${API_NAME}'].id" --output text 2>/dev/null)
+
+if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
+    API_ID=$(aws apigateway create-rest-api \
+        --name "$API_NAME" \
+        --description "Denodo POC Authorization API" \
+        --endpoint-configuration types=REGIONAL \
+        --tags Project="$PROJECT_NAME" \
         --region "$REGION" \
-        --query "items[?name=='${API_NAME}'].id" --output text)
+        --query 'id' --output text)
+    log_success "API Gateway created: $API_ID"
+else
+    log_info "Reusing existing API Gateway: $API_ID"
+fi
 
 log_success "API Gateway ID: $API_ID"
 
