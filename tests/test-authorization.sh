@@ -10,8 +10,8 @@
 # Author: Jaafar Benabderrazak
 ###############################################################################
 
-set -e
-trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO. Command: $BASH_COMMAND\033[0m"' ERR
+set -eE
+trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO.\033[0m"; echo -e "\033[0;31m  Command: $BASH_COMMAND\033[0m"; echo -e "\033[1;33m  Hint: Check that deployment-info.json exists, AWS credentials are valid, and the API Gateway + Lambda are deployed.\033[0m"' ERR
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -73,10 +73,24 @@ if [ -z "$API_ENDPOINT" ]; then
 fi
 
 # Get API key
-API_KEY=$(aws secretsmanager get-secret-value \
+echo -e "${YELLOW}  Fetching API key from Secrets Manager (${PROJECT_NAME}/api/auth-key)...${NC}"
+API_KEY_RAW=$(aws secretsmanager get-secret-value \
     --secret-id "${PROJECT_NAME}/api/auth-key" \
     --region "$REGION" \
-    --query SecretString --output text | jq -r '.apiKey')
+    --query SecretString --output text 2>&1) || {
+    echo -e "${RED}  Failed to retrieve API key from Secrets Manager.${NC}"
+    echo -e "${RED}  Error: $API_KEY_RAW${NC}"
+    echo -e "${YELLOW}  Check: aws secretsmanager list-secrets --region $REGION --query 'SecretList[?contains(Name,\`auth-key\`)].Name'${NC}"
+    exit 1
+}
+API_KEY=$(echo "$API_KEY_RAW" | jq -r '.apiKey')
+if [ -z "$API_KEY" ] || [ "$API_KEY" == "null" ]; then
+    echo -e "${RED}  API key is empty or null. Raw secret value:${NC}"
+    echo -e "  $API_KEY_RAW" | head -c 200
+    echo ""
+    exit 1
+fi
+echo -e "${GREEN}  API key retrieved (${#API_KEY} chars)${NC}"
 
 PERMISSIONS_URL="${API_ENDPOINT}/api/v1/users"
 
@@ -93,11 +107,23 @@ echo ""
 echo "▶ Valid API Requests"
 
 for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
+    CURL_ERR=$(mktemp)
     HTTP_STATUS=$(curl -s -o /tmp/auth_response.json -w "%{http_code}" \
         -H "X-API-Key: ${API_KEY}" \
-        "${PERMISSIONS_URL}/${USER_EMAIL}/permissions" 2>&1)
+        "${PERMISSIONS_URL}/${USER_EMAIL}/permissions" 2>"$CURL_ERR") || true
+
+    if [ -s "$CURL_ERR" ]; then
+        echo -e "  ${YELLOW}  curl stderr: $(cat "$CURL_ERR")${NC}"
+    fi
+    rm -f "$CURL_ERR"
 
     assert "GET /${USER_EMAIL}/permissions returns 200" "200" "$HTTP_STATUS"
+
+    if [ "$HTTP_STATUS" != "200" ]; then
+        echo -e "  ${YELLOW}    Response body:${NC}"
+        cat /tmp/auth_response.json 2>/dev/null | jq . 2>/dev/null || cat /tmp/auth_response.json 2>/dev/null | head -c 500
+        echo ""
+    fi
 
     if [ "$HTTP_STATUS" == "200" ]; then
         # Validate response structure
@@ -112,6 +138,7 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
             PASS=$((PASS + 1))
         else
             echo -e "  ${RED}✗ FAIL${NC} Response missing profiles for $USER_EMAIL"
+            echo -e "  ${YELLOW}    Full response: $(echo "$RESPONSE" | jq -c . 2>/dev/null || echo "$RESPONSE" | head -c 300)${NC}"
             FAIL=$((FAIL + 1))
         fi
 
@@ -122,6 +149,7 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
             PASS=$((PASS + 1))
         else
             echo -e "  ${RED}✗ FAIL${NC} Response missing datasources for $USER_EMAIL"
+            echo -e "  ${YELLOW}    Full response: $(echo "$RESPONSE" | jq -c . 2>/dev/null || echo "$RESPONSE" | head -c 300)${NC}"
             FAIL=$((FAIL + 1))
         fi
     fi
@@ -134,10 +162,14 @@ done
 echo ""
 echo "▶ Security: Missing API Key"
 
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>&1)
+HTTP_STATUS=$(curl -s -o /tmp/auth_nokey.json -w "%{http_code}" \
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null) || true
 
 assert "Request without API key returns 403" "403" "$HTTP_STATUS"
+if [ "$HTTP_STATUS" != "403" ]; then
+    echo -e "  ${YELLOW}    Got HTTP $HTTP_STATUS — Response: $(cat /tmp/auth_nokey.json 2>/dev/null | head -c 300)${NC}"
+fi
+rm -f /tmp/auth_nokey.json
 
 ###############################################################################
 # Test 3: Invalid API Key
@@ -146,11 +178,15 @@ assert "Request without API key returns 403" "403" "$HTTP_STATUS"
 echo ""
 echo "▶ Security: Invalid API Key"
 
-HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+HTTP_STATUS=$(curl -s -o /tmp/auth_badkey.json -w "%{http_code}" \
     -H "X-API-Key: invalid-key-12345" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>&1)
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null) || true
 
 assert "Request with invalid API key returns 403" "403" "$HTTP_STATUS"
+if [ "$HTTP_STATUS" != "403" ]; then
+    echo -e "  ${YELLOW}    Got HTTP $HTTP_STATUS — Response: $(cat /tmp/auth_badkey.json 2>/dev/null | head -c 300)${NC}"
+fi
+rm -f /tmp/auth_badkey.json
 
 ###############################################################################
 # Test 4: Unknown User
@@ -161,9 +197,12 @@ echo "▶ Unknown User Handling"
 
 HTTP_STATUS=$(curl -s -o /tmp/auth_unknown.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
-    "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>&1)
+    "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>/dev/null) || true
 
 assert "Unknown user returns 200 with guest profile" "200" "$HTTP_STATUS"
+if [ "$HTTP_STATUS" != "200" ]; then
+    echo -e "  ${YELLOW}    Got HTTP $HTTP_STATUS — Response: $(cat /tmp/auth_unknown.json 2>/dev/null | head -c 300)${NC}"
+fi
 
 ###############################################################################
 # Test 5: Analyst Permissions Validation
@@ -174,7 +213,7 @@ echo "▶ Analyst Permission Scope"
 
 HTTP_STATUS=$(curl -s -o /tmp/auth_analyst.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>&1)
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null) || true
 
 if [ "$HTTP_STATUS" == "200" ]; then
     ANALYST_RESPONSE=$(cat /tmp/auth_analyst.json)

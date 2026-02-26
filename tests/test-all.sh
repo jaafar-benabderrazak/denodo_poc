@@ -31,9 +31,13 @@ echo -e "${MAGENTA}║     DENODO KEYCLOAK POC - FULL TEST SUITE                
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
+SUITE_LOG_DIR="/tmp/denodo-test-logs"
+mkdir -p "$SUITE_LOG_DIR"
+
 run_test_suite() {
     local suite_name=$1
     local suite_script=$2
+    local log_file="$SUITE_LOG_DIR/$(basename "$suite_script" .sh).log"
 
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -47,15 +51,25 @@ run_test_suite() {
 
     chmod +x "$suite_script"
     set +e
-    bash "$suite_script"
-    local exit_code=$?
+    bash "$suite_script" 2>&1 | tee "$log_file"
+    local exit_code=${PIPESTATUS[0]}
     set -e
 
+    local duration_note=""
     if [ $exit_code -eq 0 ]; then
         echo -e "\n  ${GREEN}▶ Suite PASSED${NC}"
         SUITES_PASS=$((SUITES_PASS + 1))
     else
         echo -e "\n  ${RED}▶ Suite FAILED ($exit_code test(s) failed)${NC}"
+        echo -e "  ${YELLOW}  Full log saved: $log_file${NC}"
+        # Show last error context from log
+        local fail_lines=$(grep -n "FAIL\|FATAL\|Error\|error" "$log_file" 2>/dev/null | tail -5)
+        if [ -n "$fail_lines" ]; then
+            echo -e "  ${YELLOW}  Error summary:${NC}"
+            echo "$fail_lines" | while read -r line; do
+                echo -e "    ${RED}$line${NC}"
+            done
+        fi
         SUITES_FAIL=$((SUITES_FAIL + 1))
         TOTAL_FAIL=$((TOTAL_FAIL + exit_code))
     fi
@@ -104,9 +118,17 @@ else
     echo -e "  ${RED}╚══════════════════════════════════════╝${NC}"
     echo ""
     echo "  Review the failed tests above and check:"
-    echo "    • ECS service logs:   aws logs tail /ecs/keycloak-provider"
-    echo "    • Lambda logs:        aws logs tail /aws/lambda/denodo-permissions-api"
+    echo "    • ECS service logs:   aws logs tail /ecs/keycloak-provider --region eu-west-3"
+    echo "    • Lambda logs:        aws logs tail /aws/lambda/denodo-permissions-api --region eu-west-3"
     echo "    • RDS connectivity:   Check security groups and subnets"
+    echo ""
+    echo -e "  ${YELLOW}Saved test logs:${NC}"
+    for logfile in "$SUITE_LOG_DIR"/*.log; do
+        [ -f "$logfile" ] && echo "    • $logfile"
+    done
+    echo ""
+    echo "  Re-run a single failing suite for detailed output:"
+    echo "    bash tests/test-authorization.sh"
     echo ""
 fi
 
