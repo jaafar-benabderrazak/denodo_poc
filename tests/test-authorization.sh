@@ -13,6 +13,12 @@
 set -eE
 trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO.\033[0m"; echo -e "\033[0;31m  Command: $BASH_COMMAND\033[0m"; echo -e "\033[1;33m  Hint: Check that deployment-info.json exists, AWS credentials are valid, and the API Gateway + Lambda are deployed.\033[0m"' ERR
 
+# Verbose mode: -v or --verbose or VERBOSE=1
+VERBOSE="${VERBOSE:-0}"
+for arg in "$@"; do
+    case "$arg" in -v|--verbose) VERBOSE=1 ;; esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPLOYMENT_INFO="$PROJECT_DIR/deployment-info.json"
@@ -21,7 +27,13 @@ DEPLOYMENT_INFO="$PROJECT_DIR/deployment-info.json"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
+
+verbose() {
+    [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}$*${NC}"
+}
 
 PASS=0
 FAIL=0
@@ -162,6 +174,31 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
             echo -e "  ${RED}✗ FAIL${NC} Response missing datasources for $USER_EMAIL"
             echo -e "  ${YELLOW}    Full response: $(echo "$RESPONSE" | jq -c . 2>/dev/null || echo "$RESPONSE" | head -c 300)${NC}"
             FAIL=$((FAIL + 1))
+        fi
+
+        # Verbose: show full permission payload
+        if [ "$VERBOSE" = "1" ]; then
+            PROFILES=$(echo "$RESPONSE" | jq -r '.profiles // [] | join(", ")')
+            ROLES=$(echo "$RESPONSE" | jq -r '.roles // [] | join(", ")')
+            DS_NAMES=$(echo "$RESPONSE" | jq -r '.datasources[]?.name // empty' | paste -sd', ')
+            MAX_ROWS=$(echo "$RESPONSE" | jq -r '.maxRowsPerQuery // "?"')
+            CAN_EXPORT=$(echo "$RESPONSE" | jq -r '.canExport // "?"')
+            CAN_VIEWS=$(echo "$RESPONSE" | jq -r '.canCreateViews // "?"')
+            echo -e "  ${CYAN}── $USER_EMAIL Permissions ──${NC}"
+            echo -e "  ${DIM}  Profiles:       $PROFILES${NC}"
+            echo -e "  ${DIM}  Roles:          $ROLES${NC}"
+            echo -e "  ${DIM}  Datasources:    $DS_NAMES${NC}"
+            echo -e "  ${DIM}  Max rows/query: $MAX_ROWS${NC}"
+            echo -e "  ${DIM}  Can export:     $CAN_EXPORT | Can create views: $CAN_VIEWS${NC}"
+            # Show datasource details
+            DS_COUNT=$(echo "$RESPONSE" | jq '.datasources | length')
+            for ((i=0; i<DS_COUNT; i++)); do
+                DS_ID=$(echo "$RESPONSE" | jq -r ".datasources[$i].id")
+                DS_TYPE=$(echo "$RESPONSE" | jq -r ".datasources[$i].type")
+                DS_PERMS=$(echo "$RESPONSE" | jq -r ".datasources[$i].permissions // [] | join(\", \")")
+                DS_TABLES=$(echo "$RESPONSE" | jq -r ".datasources[$i].tables // .datasources[$i].endpoints // [] | join(\", \")")
+                echo -e "  ${DIM}  [$DS_ID] type=$DS_TYPE perms=[$DS_PERMS] items=[$DS_TABLES]${NC}"
+            done
         fi
     fi
 done

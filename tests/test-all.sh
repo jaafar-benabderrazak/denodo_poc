@@ -4,13 +4,20 @@
 #
 # Orchestrator that runs all test scripts and reports overall results.
 #
-# Usage: ./tests/test-all.sh
+# Usage: ./tests/test-all.sh [-v|--verbose]
 #
 # Date: February 2026
 # Author: Jaafar Benabderrazak
 ###############################################################################
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Verbose mode: pass through to sub-scripts
+VERBOSE="${VERBOSE:-0}"
+VERBOSE_FLAG=""
+for arg in "$@"; do
+    case "$arg" in -v|--verbose) VERBOSE=1; VERBOSE_FLAG="-v" ;; esac
+done
 
 # Colors
 RED='\033[0;31m'
@@ -29,6 +36,9 @@ echo ""
 echo -e "${MAGENTA}╔════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${MAGENTA}║     DENODO KEYCLOAK POC - FULL TEST SUITE                 ║${NC}"
 echo -e "${MAGENTA}╚════════════════════════════════════════════════════════════╝${NC}"
+if [ "$VERBOSE" = "1" ]; then
+    echo -e "  ${CYAN}Mode: VERBOSE (showing tokens, permissions, data samples)${NC}"
+fi
 echo ""
 
 SUITE_LOG_DIR="/tmp/denodo-test-logs"
@@ -51,7 +61,7 @@ run_test_suite() {
 
     chmod +x "$suite_script"
     set +e
-    bash "$suite_script" 2>&1 | tee "$log_file"
+    VERBOSE="$VERBOSE" bash "$suite_script" $VERBOSE_FLAG 2>&1 | tee "$log_file"
     local exit_code=${PIPESTATUS[0]}
     set -e
 

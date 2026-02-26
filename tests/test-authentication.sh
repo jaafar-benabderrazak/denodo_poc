@@ -10,8 +10,14 @@
 # Author: Jaafar Benabderrazak
 ###############################################################################
 
-set -e
+set -eE
 trap 'echo -e "\033[0;31m[FATAL] Script failed at line $LINENO. Command: $BASH_COMMAND\033[0m"' ERR
+
+# Verbose mode: -v or --verbose or VERBOSE=1
+VERBOSE="${VERBOSE:-0}"
+for arg in "$@"; do
+    case "$arg" in -v|--verbose) VERBOSE=1 ;; esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -21,7 +27,26 @@ DEPLOYMENT_INFO="$PROJECT_DIR/deployment-info.json"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
 NC='\033[0m'
+
+verbose() {
+    [ "$VERBOSE" = "1" ] && echo -e "  ${DIM}$*${NC}"
+}
+
+# Decode JWT payload (base64url -> JSON)
+decode_jwt_payload() {
+    local token=$1
+    local payload=$(echo "$token" | cut -d'.' -f2)
+    # Fix base64url padding
+    local padded=$payload
+    case $((${#padded} % 4)) in
+        2) padded="${padded}==" ;;
+        3) padded="${padded}=" ;;
+    esac
+    echo "$padded" | tr '_-' '/+' | base64 -d 2>/dev/null | jq . 2>/dev/null
+}
 
 PASS=0
 FAIL=0
@@ -115,6 +140,18 @@ assert_not_empty "Provider userinfo_endpoint is set" "$PROVIDER_USERINFO_EP"
 PROVIDER_JWKS=$(echo "$PROVIDER_WELLKNOWN" | jq -r '.jwks_uri // empty')
 assert_not_empty "Provider jwks_uri is set" "$PROVIDER_JWKS"
 
+if [ "$VERBOSE" = "1" ]; then
+    echo -e "  ${CYAN}── Provider OIDC Discovery ──${NC}"
+    echo -e "  ${DIM}Issuer:    $PROVIDER_ISSUER${NC}"
+    echo -e "  ${DIM}Auth EP:   $PROVIDER_AUTH_EP${NC}"
+    echo -e "  ${DIM}Token EP:  $PROVIDER_TOKEN_EP${NC}"
+    echo -e "  ${DIM}JWKS URI:  $PROVIDER_JWKS${NC}"
+    SUPPORTED_GRANTS=$(echo "$PROVIDER_WELLKNOWN" | jq -r '.grant_types_supported // [] | join(", ")')
+    echo -e "  ${DIM}Grants:    $SUPPORTED_GRANTS${NC}"
+    SUPPORTED_SCOPES=$(echo "$PROVIDER_WELLKNOWN" | jq -r '.scopes_supported // [] | join(", ")')
+    echo -e "  ${DIM}Scopes:    $SUPPORTED_SCOPES${NC}"
+fi
+
 ###############################################################################
 # Test 3: Consumer Realm Discovery
 ###############################################################################
@@ -150,6 +187,24 @@ assert_not_empty "Admin token grant returns access_token" "$ADMIN_TOKEN"
 TOKEN_TYPE=$(echo "$ADMIN_TOKEN_RESPONSE" | jq -r '.token_type // empty')
 assert "Admin token type is Bearer" "Bearer" "$TOKEN_TYPE"
 
+if [ "$VERBOSE" = "1" ] && [ ! -z "$ADMIN_TOKEN" ] && [ "$ADMIN_TOKEN" != "null" ]; then
+    EXPIRES_IN=$(echo "$ADMIN_TOKEN_RESPONSE" | jq -r '.expires_in // "?"')
+    echo -e "  ${CYAN}── Admin Token Details ──${NC}"
+    echo -e "  ${DIM}Expires in: ${EXPIRES_IN}s${NC}"
+    echo -e "  ${DIM}Token (first 50 chars): ${ADMIN_TOKEN:0:50}...${NC}"
+    DECODED=$(decode_jwt_payload "$ADMIN_TOKEN")
+    if [ ! -z "$DECODED" ]; then
+        JWT_SUB=$(echo "$DECODED" | jq -r '.sub // "?"')
+        JWT_ISS=$(echo "$DECODED" | jq -r '.iss // "?"')
+        JWT_AZP=$(echo "$DECODED" | jq -r '.azp // "?"')
+        JWT_REALM=$(echo "$DECODED" | jq -r '.realm_access.roles // [] | join(", ")')
+        echo -e "  ${DIM}Subject:   $JWT_SUB${NC}"
+        echo -e "  ${DIM}Issuer:    $JWT_ISS${NC}"
+        echo -e "  ${DIM}Client:    $JWT_AZP${NC}"
+        echo -e "  ${DIM}Roles:     $JWT_REALM${NC}"
+    fi
+fi
+
 ###############################################################################
 # Test 5: User Authentication on Provider Realm
 ###############################################################################
@@ -180,6 +235,28 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
 
     USER_TOKEN=$(echo "$TOKEN_RESPONSE" | jq -r '.access_token // empty')
     assert_not_empty "User $USER_EMAIL can authenticate" "$USER_TOKEN"
+
+    if [ "$VERBOSE" = "1" ] && [ ! -z "$USER_TOKEN" ] && [ "$USER_TOKEN" != "null" ]; then
+        EXPIRES_IN=$(echo "$TOKEN_RESPONSE" | jq -r '.expires_in // "?"')
+        REFRESH_EXPIRES=$(echo "$TOKEN_RESPONSE" | jq -r '.refresh_expires_in // "?"')
+        SCOPE=$(echo "$TOKEN_RESPONSE" | jq -r '.scope // "?"')
+        DECODED=$(decode_jwt_payload "$USER_TOKEN")
+        if [ ! -z "$DECODED" ]; then
+            JWT_SUB=$(echo "$DECODED" | jq -r '.sub // "?"')
+            JWT_EMAIL=$(echo "$DECODED" | jq -r '.email // "?"')
+            JWT_NAME=$(echo "$DECODED" | jq -r '.name // .preferred_username // "?"')
+            JWT_REALM_ROLES=$(echo "$DECODED" | jq -r '.realm_access.roles // [] | join(", ")')
+            JWT_GROUPS=$(echo "$DECODED" | jq -r '.groups // [] | join(", ")')
+            echo -e "  ${CYAN}── $USER_EMAIL Token ──${NC}"
+            echo -e "  ${DIM}  Name:     $JWT_NAME${NC}"
+            echo -e "  ${DIM}  Email:    $JWT_EMAIL${NC}"
+            echo -e "  ${DIM}  Subject:  $JWT_SUB${NC}"
+            echo -e "  ${DIM}  Scope:    $SCOPE${NC}"
+            echo -e "  ${DIM}  Roles:    $JWT_REALM_ROLES${NC}"
+            [ "$JWT_GROUPS" != "" ] && echo -e "  ${DIM}  Groups:   $JWT_GROUPS${NC}"
+            echo -e "  ${DIM}  Expires:  ${EXPIRES_IN}s (refresh: ${REFRESH_EXPIRES}s)${NC}"
+        fi
+    fi
 done
 
 ###############################################################################
