@@ -94,6 +94,17 @@ echo -e "${GREEN}  API key retrieved (${#API_KEY} chars)${NC}"
 
 PERMISSIONS_URL="${API_ENDPOINT}/api/v1/users"
 
+# Pre-flight: verify API Gateway endpoint is reachable
+API_HOST=$(echo "$API_ENDPOINT" | sed 's|https\?://||' | cut -d/ -f1)
+if ! host "$API_HOST" >/dev/null 2>&1 && ! nslookup "$API_HOST" >/dev/null 2>&1; then
+    echo -e "${RED}  DNS resolution failed for: $API_HOST${NC}"
+    echo -e "${RED}  The API Gateway endpoint no longer exists.${NC}"
+    echo -e "${YELLOW}  Fix: Redeploy the API Gateway:${NC}"
+    echo -e "${YELLOW}    ./scripts/deploy-lambda-api.sh${NC}"
+    echo -e "${YELLOW}  Then re-run this test.${NC}"
+    exit 1
+fi
+
 echo "═══════════════════════════════════════════════════════"
 echo "  AUTHORIZATION API TESTS"
 echo "  Target: $PERMISSIONS_URL"
@@ -108,7 +119,7 @@ echo "▶ Valid API Requests"
 
 for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
     CURL_ERR=$(mktemp)
-    HTTP_STATUS=$(curl -s -o /tmp/auth_response.json -w "%{http_code}" \
+    HTTP_STATUS=$(curl -sS -o /tmp/auth_response.json -w "%{http_code}" \
         -H "X-API-Key: ${API_KEY}" \
         "${PERMISSIONS_URL}/${USER_EMAIL}/permissions" 2>"$CURL_ERR") || true
 
@@ -162,8 +173,11 @@ done
 echo ""
 echo "▶ Security: Missing API Key"
 
-HTTP_STATUS=$(curl -s -o /tmp/auth_nokey.json -w "%{http_code}" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null) || true
+CURL_ERR_NOKEY=$(mktemp)
+HTTP_STATUS=$(curl -sS -o /tmp/auth_nokey.json -w "%{http_code}" \
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>"$CURL_ERR_NOKEY") || true
+[ -s "$CURL_ERR_NOKEY" ] && echo -e "  ${YELLOW}  curl error: $(cat "$CURL_ERR_NOKEY")${NC}"
+rm -f "$CURL_ERR_NOKEY"
 
 assert "Request without API key returns 403" "403" "$HTTP_STATUS"
 if [ "$HTTP_STATUS" != "403" ]; then
@@ -178,9 +192,12 @@ rm -f /tmp/auth_nokey.json
 echo ""
 echo "▶ Security: Invalid API Key"
 
-HTTP_STATUS=$(curl -s -o /tmp/auth_badkey.json -w "%{http_code}" \
+CURL_ERR_BADKEY=$(mktemp)
+HTTP_STATUS=$(curl -sS -o /tmp/auth_badkey.json -w "%{http_code}" \
     -H "X-API-Key: invalid-key-12345" \
-    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null) || true
+    "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>"$CURL_ERR_BADKEY") || true
+[ -s "$CURL_ERR_BADKEY" ] && echo -e "  ${YELLOW}  curl error: $(cat "$CURL_ERR_BADKEY")${NC}"
+rm -f "$CURL_ERR_BADKEY"
 
 assert "Request with invalid API key returns 403" "403" "$HTTP_STATUS"
 if [ "$HTTP_STATUS" != "403" ]; then
@@ -195,9 +212,12 @@ rm -f /tmp/auth_badkey.json
 echo ""
 echo "▶ Unknown User Handling"
 
-HTTP_STATUS=$(curl -s -o /tmp/auth_unknown.json -w "%{http_code}" \
+CURL_ERR_UNKNOWN=$(mktemp)
+HTTP_STATUS=$(curl -sS -o /tmp/auth_unknown.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
-    "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>/dev/null) || true
+    "${PERMISSIONS_URL}/unknown@denodo.com/permissions" 2>"$CURL_ERR_UNKNOWN") || true
+[ -s "$CURL_ERR_UNKNOWN" ] && echo -e "  ${YELLOW}  curl error: $(cat "$CURL_ERR_UNKNOWN")${NC}"
+rm -f "$CURL_ERR_UNKNOWN"
 
 assert "Unknown user returns 200 with guest profile" "200" "$HTTP_STATUS"
 if [ "$HTTP_STATUS" != "200" ]; then
@@ -211,7 +231,7 @@ fi
 echo ""
 echo "▶ Analyst Permission Scope"
 
-HTTP_STATUS=$(curl -s -o /tmp/auth_analyst.json -w "%{http_code}" \
+HTTP_STATUS=$(curl -sS -o /tmp/auth_analyst.json -w "%{http_code}" \
     -H "X-API-Key: ${API_KEY}" \
     "${PERMISSIONS_URL}/analyst@denodo.com/permissions" 2>/dev/null) || true
 
