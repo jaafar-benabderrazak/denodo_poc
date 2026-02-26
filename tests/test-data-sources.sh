@@ -106,10 +106,18 @@ if [ "$GEO_STATUS" == "200" ]; then
         echo "$GEO_RESPONSE" | jq -r '.[] | "  \(.nom) (code: \(.code), pop: \(.population // "n/a"))"' 2>/dev/null | while read -r line; do
             echo -e "  ${DIM}$line${NC}"
         done
+        echo -e "  ${CYAN}── Raw JSON: Geo API 75001 ──${NC}"
+        echo "$GEO_RESPONSE" | jq . 2>/dev/null | while IFS= read -r line; do
+            echo -e "  ${DIM}$line${NC}"
+        done
         # Also show a second postal code for variety
         GEO2=$(curl -s "https://geo.api.gouv.fr/communes?codePostal=69001&fields=nom,code,population" 2>/dev/null)
         echo "$GEO2" | jq -r '.[] | "  \(.nom) (code: \(.code), pop: \(.population // "n/a"))"' 2>/dev/null | while read -r line; do
             echo -e "  ${DIM}$line  [69001]${NC}"
+        done
+        echo -e "  ${CYAN}── Raw JSON: Geo API 69001 ──${NC}"
+        echo "$GEO2" | jq . 2>/dev/null | while IFS= read -r line; do
+            echo -e "  ${DIM}$line${NC}"
         done
     fi
 fi

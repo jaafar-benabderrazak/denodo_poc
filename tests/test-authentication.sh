@@ -150,6 +150,10 @@ if [ "$VERBOSE" = "1" ]; then
     echo -e "  ${DIM}Grants:    $SUPPORTED_GRANTS${NC}"
     SUPPORTED_SCOPES=$(echo "$PROVIDER_WELLKNOWN" | jq -r '.scopes_supported // [] | join(", ")')
     echo -e "  ${DIM}Scopes:    $SUPPORTED_SCOPES${NC}"
+    echo -e "  ${CYAN}── Raw JSON: Provider OIDC Discovery ──${NC}"
+    echo "$PROVIDER_WELLKNOWN" | jq . 2>/dev/null | while IFS= read -r line; do
+        echo -e "  ${DIM}$line${NC}"
+    done
 fi
 
 ###############################################################################
@@ -202,6 +206,14 @@ if [ "$VERBOSE" = "1" ] && [ ! -z "$ADMIN_TOKEN" ] && [ "$ADMIN_TOKEN" != "null"
         echo -e "  ${DIM}Issuer:    $JWT_ISS${NC}"
         echo -e "  ${DIM}Client:    $JWT_AZP${NC}"
         echo -e "  ${DIM}Roles:     $JWT_REALM${NC}"
+        echo -e "  ${CYAN}── Raw JSON: Admin Token Response ──${NC}"
+        echo "$ADMIN_TOKEN_RESPONSE" | jq '{token_type, expires_in, refresh_expires_in, scope, not_before_policy: .["not-before-policy"], session_state}' 2>/dev/null | while IFS= read -r line; do
+            echo -e "  ${DIM}$line${NC}"
+        done
+        echo -e "  ${CYAN}── Raw JSON: Admin JWT Payload ──${NC}"
+        echo "$DECODED" | while IFS= read -r line; do
+            echo -e "  ${DIM}$line${NC}"
+        done
     fi
 fi
 
@@ -255,6 +267,14 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
             echo -e "  ${DIM}  Roles:    $JWT_REALM_ROLES${NC}"
             [ "$JWT_GROUPS" != "" ] && echo -e "  ${DIM}  Groups:   $JWT_GROUPS${NC}"
             echo -e "  ${DIM}  Expires:  ${EXPIRES_IN}s (refresh: ${REFRESH_EXPIRES}s)${NC}"
+            echo -e "  ${CYAN}── Raw JSON: $USER_EMAIL Token Response ──${NC}"
+            echo "$TOKEN_RESPONSE" | jq '{token_type, expires_in, refresh_expires_in, scope, session_state}' 2>/dev/null | while IFS= read -r line; do
+                echo -e "  ${DIM}$line${NC}"
+            done
+            echo -e "  ${CYAN}── Raw JSON: $USER_EMAIL JWT Payload ──${NC}"
+            echo "$DECODED" | while IFS= read -r line; do
+                echo -e "  ${DIM}$line${NC}"
+            done
         fi
     fi
 done

@@ -199,6 +199,10 @@ for USER_EMAIL in analyst@denodo.com scientist@denodo.com admin@denodo.com; do
                 DS_TABLES=$(echo "$RESPONSE" | jq -r ".datasources[$i].tables // .datasources[$i].endpoints // [] | join(\", \")")
                 echo -e "  ${DIM}  [$DS_ID] type=$DS_TYPE perms=[$DS_PERMS] items=[$DS_TABLES]${NC}"
             done
+            echo -e "  ${CYAN}── Raw JSON: $USER_EMAIL Full Response ──${NC}"
+            echo "$RESPONSE" | jq . 2>/dev/null | while IFS= read -r line; do
+                echo -e "  ${DIM}$line${NC}"
+            done
         fi
     fi
 done
