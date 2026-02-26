@@ -107,15 +107,18 @@ echo -e "${GREEN}  API key retrieved (${#API_KEY} chars)${NC}"
 PERMISSIONS_URL="${API_ENDPOINT}/api/v1/users"
 
 # Pre-flight: verify API Gateway endpoint is reachable
+# Use curl HEAD request as the primary check (host/nslookup may not be installed in CloudShell)
 API_HOST=$(echo "$API_ENDPOINT" | sed 's|https\?://||' | cut -d/ -f1)
-if ! host "$API_HOST" >/dev/null 2>&1 && ! nslookup "$API_HOST" >/dev/null 2>&1; then
-    echo -e "${RED}  DNS resolution failed for: $API_HOST${NC}"
-    echo -e "${RED}  The API Gateway endpoint no longer exists.${NC}"
+PREFLIGHT_HTTP=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "https://${API_HOST}/" 2>/dev/null || echo "000")
+if [ "$PREFLIGHT_HTTP" = "000" ]; then
+    echo -e "${RED}  Cannot reach API Gateway: $API_HOST${NC}"
+    echo -e "${RED}  The endpoint may not exist or DNS has not propagated yet.${NC}"
     echo -e "${YELLOW}  Fix: Redeploy the API Gateway:${NC}"
     echo -e "${YELLOW}    ./scripts/deploy-lambda-api.sh${NC}"
-    echo -e "${YELLOW}  Then re-run this test.${NC}"
+    echo -e "${YELLOW}  Then wait ~30s and re-run this test.${NC}"
     exit 1
 fi
+verbose "Pre-flight OK: API Gateway responded with HTTP $PREFLIGHT_HTTP"
 
 echo "═══════════════════════════════════════════════════════"
 echo "  AUTHORIZATION API TESTS"
